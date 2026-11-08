@@ -41,7 +41,7 @@ internal fun McpImportDialog(
         onDismissRequest = { if (!busy) onDismiss() },
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
-        Card(modifier = Modifier.padding(horizontal = 16.dp, vertical = 32.dp)) {
+        Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 32.dp)) {
             Column(
                 modifier = Modifier
                     .padding(16.dp)
