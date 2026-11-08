@@ -134,10 +134,12 @@ class McpProtocolValidationTest {
                 listOf("tools/list", "initialize", "notifications/initialized", "tools/list"),
                 methods,
             )
+            // 第二轮不带版本头（null）：先让服务端按自己的默认版本应答，
+            // 它回告 2024-11-05，后续请求全部沿用回告值。
             assertEquals(
                 listOf(
                     McpProtocolMode.LATEST,
-                    McpProtocolMode.LEGACY,
+                    null,
                     "2024-11-05",
                     "2024-11-05",
                 ),
