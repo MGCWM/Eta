@@ -260,18 +260,17 @@ internal fun McpServersScreen(
                         }
                     }
                 }
+                Group {
+                    CouiPreference(
+                        title = stringResource(R.string.mcp_import_json),
+                        summary = stringResource(R.string.mcp_import_json_summary),
+                        onClick = {
+                            importResult = null
+                            showImport = true
+                        },
+                    )
+                }
                 CouiPageBottomSpacer()
-            }
-
-            Group {
-                CouiPreference(
-                    title = stringResource(R.string.mcp_import_json),
-                    summary = stringResource(R.string.mcp_import_json_summary),
-                    onClick = {
-                        importResult = null
-                        showImport = true
-                    },
-                )
             }
 
             CouiConfirmDialog(
