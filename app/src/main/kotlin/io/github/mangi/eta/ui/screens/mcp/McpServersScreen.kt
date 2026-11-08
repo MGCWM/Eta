@@ -34,6 +34,9 @@ import com.itos.coui.layout.Group
 import com.itos.coui.text.CouiTextKind
 import com.itos.coui.text.Text as CouiText
 import io.github.mangi.eta.R
+import io.github.mangi.eta.agent.mcp.McpConfigImport
+import io.github.mangi.eta.agent.mcp.McpEnv
+import io.github.mangi.eta.data.model.McpTransportType
 import io.github.mangi.eta.agent.mcp.McpServerManager
 import io.github.mangi.eta.agent.mcp.validateMcpEndpoint
 import io.github.mangi.eta.data.model.AppearanceUiStyle
@@ -169,7 +172,7 @@ internal fun McpServersScreen(
         scope.launch {
             working = true
             val result = withContext(Dispatchers.IO) {
-                runCatching {
+                try {
                     val parsed = McpConfigImport.parse(importText)
                     val warnings = parsed.warnings.toMutableList()
                     var added = 0
@@ -180,15 +183,21 @@ internal fun McpServersScreen(
                             ?.substringAfter("Bearer ", "")
                             ?.takeIf { it.isNotBlank() }
                             .orEmpty()
-                        runCatching {
+                        try {
                             val discovered = McpServerManager.discover(candidate, token)
                             McpServerRepository.add(discovered, token)
                             added += 1
-                        }.onFailure { failure ->
+                        } catch (failure: kotlinx.coroutines.CancellationException) {
+                            throw failure
+                        } catch (failure: Exception) {
                             warnings += "「${candidate.name}」${failure.message.orEmpty()}"
                         }
                     }
-                    added to warnings
+                    Result.success(added to warnings)
+                } catch (failure: kotlinx.coroutines.CancellationException) {
+                    throw failure
+                } catch (failure: Exception) {
+                    Result.failure<Pair<Int, List<String>>>(failure)
                 }
             }
             working = false
@@ -951,10 +960,4 @@ private fun splitArguments(raw: String): List<String> {
 private fun toolSummary(tool: McpToolDefinition): String = when {
     tool.readOnlyHint == true -> tool.description.ifBlank { stringResource(R.string.mcp_read_only_tool) }
     else -> tool.description.ifBlank { stringResource(R.string.mcp_may_modify_data) }
-}
-private fun toolSummary(tool: McpToolDefinition): String = when {
-    tool.readOnlyHint == true -> tool.description.ifBlank { stringResource(R.string.mcp_read_only_tool) }
-    else -> tool.description.ifBlank { stringResource(R.string.mcp_may_modify_data) }
-}
-ata) }
 }

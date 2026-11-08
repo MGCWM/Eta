@@ -52,12 +52,20 @@ internal fun McpDiagnosticsDialog(
     var toolName by remember { mutableStateOf("") }
     var arguments by remember { mutableStateOf("{}") }
 
-    fun run(label: String, block: () -> JSONObject) {
+    fun run(label: String, block: suspend () -> JSONObject) {
         if (busy.isNotEmpty()) return
         scope.launch {
             busy = label
             output = "$label …"
-            val result = withContext(Dispatchers.IO) { runCatching(block) }
+            val result = withContext(Dispatchers.IO) {
+                try {
+                    Result.success(block())
+                } catch (failure: kotlinx.coroutines.CancellationException) {
+                    throw failure
+                } catch (failure: Exception) {
+                    Result.failure<JSONObject>(failure)
+                }
+            }
             busy = ""
             output = result.fold(
                 onSuccess = { payload -> "$label\n" + payload.toString(2) },
