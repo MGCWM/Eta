@@ -42,8 +42,20 @@ internal class McpHttpTransport(
     @Volatile
     private var closed = false
 
+    /**
+     * 初始协商结果直接取自已发现的记录。
+     *
+     * discover 时已经把服务端回告的版本写进了 lastProtocolVersion，调用阶段
+     * 没有理由再握一次手：McpRunContext 每个运行周期都新建 transport，
+     * 若这里从 null 开始，每次工具调用都要多两次往返，测试里的假服务器也会
+     * 因为多出来的 initialize 而错位。
+     *
+     * 这个值仍然只是「建议值」：一旦服务端拒绝（isVersionRejection），
+     * 会清空它重新走完整协商链，脏数据不会把服务器判死。
+     */
     @Volatile
-    private var negotiatedVersion: String? = null
+    private var negotiatedVersion: String? =
+        server.lastProtocolVersion?.trim()?.takeIf { it.isNotEmpty() }
 
     @Volatile
     private var legacySessionId: String? = null
@@ -411,9 +423,9 @@ internal class McpHttpTransport(
                         ?.let { header(HEADER_PROTOCOL_VERSION, it) }
                 }
                 if (protocolVersion == McpProtocolMode.LATEST) header(HEADER_METHOD, method)
-                name?.let {
-                    header(HEADER_NAME, if (protocolVersion == McpProtocolMode.LATEST) encodeMcpHeaderValue(it) else it)
-                }
+                // 头部只允许可见 ASCII，中文工具名在旧协议分支同样需要 base64 包装，
+                // 否则 OkHttp 直接抛 IllegalArgumentException。
+                name?.let { header(HEADER_NAME, encodeMcpHeaderValue(it)) }
                 sessionId?.let { header(HEADER_SESSION_ID, it) }
                 extraHeaders.forEach { (headerName, headerValue) -> header(headerName, headerValue) }
                 additionalHeaders.forEach { (headerName, headerValue) -> header(headerName, headerValue) }
