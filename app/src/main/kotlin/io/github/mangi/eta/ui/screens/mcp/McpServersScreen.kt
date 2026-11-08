@@ -141,12 +141,16 @@ internal fun McpServersScreen(
                                 McpAuthorizationType.BEARER
                             },
                         )
-                        val discovered = McpServerManager.discover(draft, token)
-                        McpServerRepository.add(discovered, token)
+                        // 先落库再发现：服务器暂时离线、内网地址当前不可达，都不该拦住保存。
+                        val stored = McpServerRepository.add(draft, token)
+                        val warning = runCatching {
+                            McpServerRepository.update(McpServerManager.discover(stored, token))
+                        }.exceptionOrNull()?.let { "已保存，但暂时没连上：${it.message.orEmpty()}" }
+                        stored to warning
                     }
                 }
                 working = false
-                result.onSuccess {
+                result.onSuccess { (stored, warning) ->
                     showAdd = false
                     name = ""
                     url = ""
@@ -156,11 +160,9 @@ internal fun McpServersScreen(
                     headersText = ""
                     token = ""
                     error = null
-                    Toast.makeText(
-                        context,
-                        resources.getString(R.string.mcp_server_added, it.tools.size),
-                        Toast.LENGTH_SHORT,
-                    ).show()
+                    val message = warning
+                        ?: resources.getString(R.string.mcp_server_added, stored.tools.size)
+                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
                 }.onFailure {
                     error = it.message ?: resources.getString(R.string.mcp_connection_failed)
                 }
@@ -185,9 +187,16 @@ internal fun McpServersScreen(
                             ?.takeIf { it.isNotBlank() }
                             .orEmpty()
                         try {
-                            val discovered = McpServerManager.discover(candidate, token)
-                            McpServerRepository.add(discovered, token)
+                            // 先落库，再尽力拉一次工具；连不上只记警告，不影响导入结果。
+                            val stored = McpServerRepository.add(candidate, token)
                             added += 1
+                            try {
+                                McpServerRepository.update(McpServerManager.discover(stored, token))
+                            } catch (failure: kotlinx.coroutines.CancellationException) {
+                                throw failure
+                            } catch (failure: Exception) {
+                                warnings += "「${candidate.name}」已保存，暂时没连上：${failure.message.orEmpty()}"
+                            }
                         } catch (failure: kotlinx.coroutines.CancellationException) {
                             throw failure
                         } catch (failure: Exception) {
