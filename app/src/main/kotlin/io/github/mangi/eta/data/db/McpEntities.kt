@@ -25,13 +25,13 @@ internal data class McpServerEntity(
     @ColumnInfo(name = "last_refreshed_at") val lastRefreshedAt: Long?,
     @ColumnInfo(name = "last_protocol_version") val lastProtocolVersion: String?,
     @ColumnInfo(name = "tools_expire_at") val toolsExpireAt: Long?,
-    @ColumnInfo(name = "transport") val transport: String = "http",
-    @ColumnInfo(name = "command") val command: String = "",
-    @ColumnInfo(name = "args_json") val argsJson: String = "[]",
-    @ColumnInfo(name = "environment_json") val environmentJson: String = "[]",
-    @ColumnInfo(name = "headers_json") val headersJson: String = "[]",
-    @ColumnInfo(name = "startup_timeout_ms") val startupTimeoutMs: Long = 60_000L,
-    @ColumnInfo(name = "request_timeout_ms") val requestTimeoutMs: Long = 120_000L,
+    @ColumnInfo(name = "transport", defaultValue = "'http'") val transport: String = "http",
+    @ColumnInfo(name = "command", defaultValue = "''") val command: String = "",
+    @ColumnInfo(name = "args_json", defaultValue = "'[]'") val argsJson: String = "[]",
+    @ColumnInfo(name = "environment_json", defaultValue = "'[]'") val environmentJson: String = "[]",
+    @ColumnInfo(name = "headers_json", defaultValue = "'[]'") val headersJson: String = "[]",
+    @ColumnInfo(name = "startup_timeout_ms", defaultValue = "60000") val startupTimeoutMs: Long = 60_000L,
+    @ColumnInfo(name = "request_timeout_ms", defaultValue = "120000") val requestTimeoutMs: Long = 120_000L,
 )
 
 private val mcpJson = Json {

@@ -112,16 +112,27 @@ internal class McpHttpTransport(
         val params = JSONObject().apply {
             cursor?.takeIf { it.isNotBlank() }?.let { put("cursor", it) }
         }
-        val result = unwrapResult(
+        val fetch = if (version == McpProtocolMode.LATEST) {
             request(
                 method = "tools/list",
                 params = params,
                 protocolVersion = version,
-                sessionId = if (version == McpProtocolMode.LATEST) null else legacySessionId,
+                sessionId = null,
                 stage = McpStage.LIST_TOOLS,
-            ).json,
-            McpStage.LIST_TOOLS,
-        )
+            )
+        } else {
+            // 有状态模式：会话过期（404）时重新 initialize 并重试一次。
+            withLegacySessionRetry { sessionId ->
+                request(
+                    method = "tools/list",
+                    params = params,
+                    protocolVersion = version,
+                    sessionId = sessionId,
+                    stage = McpStage.LIST_TOOLS,
+                )
+            }
+        }
+        val result = unwrapResult(fetch.json, McpStage.LIST_TOOLS)
         if (version == McpProtocolMode.LATEST) {
             // 旧服务会忽略现代协议元数据、照样用 200 返回，形状不对就得改走 initialize 协商。
             if (!result.has("resultType") || result.isNull("resultType")) {
@@ -146,7 +157,10 @@ internal class McpHttpTransport(
      * inputSchema 传进来，否则 x-mcp-header 参数不会映射成请求头。
      */
     fun callTool(name: String, arguments: JSONObject, inputSchemaJson: String?): JSONObject {
-        val version = negotiatedVersion ?: negotiateVersion()
+        val version = negotiatedVersion ?: when (server.protocolMode) {
+            McpProtocolMode.LEGACY -> initializeLegacy()
+            else -> McpProtocolMode.LATEST.also { negotiatedVersion = it }
+        }
         val parameterHeaders = if (version == McpProtocolMode.LATEST) {
             val schema = inputSchemaJson ?: schemaByName[name]
             if (schema == null) {
@@ -274,7 +288,7 @@ internal class McpHttpTransport(
             legacySessionId = null
             negotiatedVersion = null
             handshakeCache = null
-            negotiateVersion()
+            initializeLegacy()
             block(legacySessionId)
         }
     }
