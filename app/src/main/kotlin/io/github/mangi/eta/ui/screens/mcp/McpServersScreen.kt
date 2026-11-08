@@ -589,6 +589,7 @@ internal fun McpServerDetailScreen(
     var showDelete by remember { mutableStateOf(false) }
     var showToken by remember { mutableStateOf(false) }
     var showDiagnostics by remember { mutableStateOf(false) }
+    var showEdit by remember { mutableStateOf(false) }
     var token by remember { mutableStateOf("") }
 
     val onRefresh: () -> Unit = {
@@ -631,13 +632,19 @@ internal fun McpServerDetailScreen(
                 Group(title = stringResource(R.string.mcp_server_settings)) {
                     CouiSwitchPreference(
                         title = stringResource(R.string.mcp_enable_server),
-                        summary = server.url,
+                        summary = endpointSummary(server),
                         checked = server.enabled,
                         onCheckedChange = { enabled ->
                             scope.launch(Dispatchers.IO) {
                                 McpServerRepository.update(server.copy(enabled = enabled))
                             }
                         },
+                    )
+                    Divider()
+                    CouiPreference(
+                        title = stringResource(R.string.mcp_edit_server),
+                        summary = stringResource(R.string.mcp_edit_server_summary),
+                        onClick = { showEdit = true },
                     )
                     Divider()
                     CouiPreference(
@@ -798,6 +805,11 @@ internal fun McpServerDetailScreen(
                             },
                         )
                         ArrowPreference(
+                            title = stringResource(R.string.mcp_edit_server),
+                            summary = stringResource(R.string.mcp_edit_server_summary),
+                            onClick = { showEdit = true },
+                        )
+                        ArrowPreference(
                             title = stringResource(R.string.mcp_update_token),
                             summary = stringResource(
                                 if (server.authorizationType == McpAuthorizationType.BEARER) {
@@ -948,6 +960,23 @@ internal fun McpServerDetailScreen(
             McpDiagnosticsDialog(
                 server = current,
                 onDismiss = { showDiagnostics = false },
+            )
+        }
+    }
+
+    if (showEdit) {
+        server?.let { current ->
+            McpServerEditDialog(
+                server = current,
+                onDismiss = { showEdit = false },
+                onSaved = {
+                    showEdit = false
+                    Toast.makeText(
+                        context,
+                        resources.getString(R.string.mcp_server_updated),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                },
             )
         }
     }

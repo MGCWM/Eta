@@ -1188,6 +1188,9 @@
   <string name="mcp_delete_confirm">删除 %1$s？此操作无法撤销。</string>
   <string name="mcp_read_only_tool">只读工具</string>
   <string name="mcp_may_modify_data">可能修改数据或访问外部服务</string>
+  <string name="mcp_edit_server">编辑配置</string>
+  <string name="mcp_edit_server_summary">修改地址、命令、请求头或 Token</string>
+  <string name="mcp_server_updated">服务器已更新</string>
   <string name="mcp_transport_stdio">使用本地命令（STDIO）</string>
   <string name="mcp_transport_stdio_summary">启动本地进程，用 stdin/stdout 走 JSON-RPC，适配 npx / uvx 类服务器</string>
   <string name="mcp_stdio_command">启动命令</string>

@@ -1204,6 +1204,9 @@
   <string name="mcp_delete_confirm">Delete %1$s? This cannot be undone.</string>
   <string name="mcp_read_only_tool">Read-only tool</string>
   <string name="mcp_may_modify_data">May modify data or call an external service</string>
+  <string name="mcp_edit_server">Edit configuration</string>
+  <string name="mcp_edit_server_summary">Change the address, command, headers or token</string>
+  <string name="mcp_server_updated">Server updated</string>
   <string name="mcp_transport_stdio">Run as a local command (STDIO)</string>
   <string name="mcp_transport_stdio_summary">Start a local process and speak JSON-RPC over stdin/stdout, for npx / uvx style servers</string>
   <string name="mcp_stdio_command">Command</string>
