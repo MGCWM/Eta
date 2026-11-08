@@ -59,7 +59,10 @@ internal class McpRunSnapshot(
             McpServerRepository.enabledServers().forEach { configured ->
                 val bearerToken = McpServerRepository.bearerToken(configured.id)
                 // STDIO 每次 run 都重新握手代价过高；只有 HTTP 的现代协议带 TTL，才按过期时间刷新。
+                // tools 为空说明上一次发现没成（端点当时不可达、协议版本对不上、
+                // 或者数据库里留着别人的版本号），这种记录留着也调不动，必须重试一次。
                 val needsRefresh = configured.lastProtocolVersion == null ||
+                    configured.tools.isEmpty() ||
                     (!configured.isStdio &&
                         configured.lastProtocolVersion == io.github.mangi.eta.data.model.McpProtocolMode.LATEST &&
                         (configured.toolsExpireAt == null || configured.toolsExpireAt <= now))

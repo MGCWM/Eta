@@ -238,29 +238,53 @@ internal class McpHttpTransport(
         else -> false
     }
 
-    private fun initializeLegacy(): String {
+    private fun initializeLegacy(): String = synchronized(lifecycleLock) {
+        negotiatedVersion?.let { return it }
+        var lastFailure: McpTransportException? = null
+        // 第一轮不带版本头，让服务端按自己的默认版本应答；后面再逐个候选猜。
+        for (candidate in PROTOCOL_CANDIDATES) {
+            try {
+                return initializeWith(candidate)
+            } catch (failure: McpTransportException) {
+                lastFailure = failure
+                if (!isVersionRejection(failure)) throw failure
+            }
+        }
+        throw lastFailure ?: McpTransportException(
+            stage = McpStage.HANDSHAKE,
+            code = "MCP_HANDSHAKE_FAILED",
+            message = "MCP 握手失败：没有可用的协议版本",
+        )
+    }
+
+    /**
+     * 单次 initialize。
+     *
+     * [candidate] 为 null 表示不声明版本，让服务端挑。MCP 规范里 initialize 的
+     * params 才携带版本协商，请求头只是给 Streamable HTTP 的路由提示，多数实现
+     * 允许缺省；先空手问一次能救回那些只认自己版本号的服务器。
+     */
+    private fun initializeWith(candidate: String?): String {
+        val requested = candidate ?: McpProtocolMode.LEGACY
         val initialized = request(
             method = "initialize",
             params = JSONObject()
-                .put("protocolVersion", McpProtocolMode.LEGACY)
+                .put("protocolVersion", requested)
                 .put("capabilities", JSONObject())
                 .put(
                     "clientInfo",
                     JSONObject().put("name", "Eta").put("version", CLIENT_VERSION),
                 ),
-            protocolVersion = McpProtocolMode.LEGACY,
+            protocolVersion = requested,
             sessionId = null,
             stage = McpStage.HANDSHAKE,
+            omitVersionHeader = candidate == null,
         )
         val result = unwrapResult(initialized.json, McpStage.HANDSHAKE)
-        val protocolVersion = result.optString("protocolVersion")
-        if (protocolVersion !in SUPPORTED_LEGACY_PROTOCOL_VERSIONS) {
-            throw McpTransportException(
-                stage = McpStage.HANDSHAKE,
-                code = "MCP_PROTOCOL_VERSION_UNSUPPORTED",
-                message = "MCP 服务器返回了不支持的协议版本：$protocolVersion",
-            )
-        }
+        // 以服务端回告为准。规范明确允许服务端改选它支持的版本，
+        // 客户端应当接受回告值而不是拿本地白名单去否决。
+        val reported = result.optString("protocolVersion").takeIf { it.isNotBlank() }
+        val protocolVersion = reported ?: requested
         legacySessionId = initialized.sessionId
         notification(
             method = "notifications/initialized",
@@ -277,6 +301,30 @@ internal class McpHttpTransport(
             capabilities = result.optJSONObject("capabilities") ?: JSONObject(),
         )
         return protocolVersion
+    }
+
+    /**
+     * 服务端明确表示「不认这个协议版本」，换下一档重试。
+     *
+     * initialize 阶段收到的 400 基本只有两种成因：协议版本不被接受，或者参数不合。
+     * 前者换版本能救回来，后者换版本也只是多一次请求，代价很低；而漏判会让一台
+     * 明明可用的服务器彻底用不了，所以这里 400 一律换档，401/403 这类鉴权失败
+     * 与网络错误照旧原样上抛。
+     */
+    private fun isVersionRejection(failure: McpTransportException): Boolean {
+        if (failure.code == "MCP_PROTOCOL_VERSION_UNSUPPORTED") return true
+        val status = failure.httpStatus ?: return false
+        if (status == 400) return true
+        if (status !in COMPATIBILITY_HTTP_STATUS) return false
+        val text = buildString {
+            append(failure.message)
+            append(' ')
+            append(failure.upstreamMessage)
+        }.lowercase()
+        return "protocol-version" in text ||
+            "protocol version" in text ||
+            "protocol_version" in text ||
+            "unsupported protocol" in text
     }
 
     private fun <T> withLegacySessionRetry(block: (String?) -> T): T {
@@ -301,6 +349,7 @@ internal class McpHttpTransport(
         stage: String,
         name: String? = null,
         additionalHeaders: Map<String, String> = emptyMap(),
+        omitVersionHeader: Boolean = false,
     ): WireResponse {
         val id = requestIds.getAndIncrement()
         val body = JSONObject()
@@ -312,9 +361,11 @@ internal class McpHttpTransport(
             .url(endpoint)
             .post(body.toString().toRequestBody(JSON_MEDIA_TYPE))
             .header("Accept", "application/json, text/event-stream")
-            .header(HEADER_PROTOCOL_VERSION, protocolVersion)
-            .header(HEADER_METHOD, method)
             .apply {
+                // 旧服务器（MT 管理器这类）看到不认识的 Mcp-Method 会直接 400，
+                // 只有现代协议才需要它做路由。首次探活也允许完全省略版本头。
+                if (!omitVersionHeader) header(HEADER_PROTOCOL_VERSION, protocolVersion)
+                if (protocolVersion == McpProtocolMode.LATEST) header(HEADER_METHOD, method)
                 name?.let {
                     header(HEADER_NAME, if (protocolVersion == McpProtocolMode.LATEST) encodeMcpHeaderValue(it) else it)
                 }
@@ -383,13 +434,25 @@ internal class McpHttpTransport(
                 }
                 if (!response.isSuccessful) {
                     val error = payload?.optJSONObject("error")
+                    // 非 JSON 的错误正文（MT 这类直接回 "Invalid MCP-Protocol-Version"）
+                    // 也要留下来：既能让版本判定认出是协议问题，也方便诊断台看原话。
+                    val rawBody = if (error == null) {
+                        runCatching { response.peekBody(MAX_TEXT_CHARS.toLong()).string() }
+                            .getOrNull()
+                            .orEmpty()
+                            .trim()
+                    } else {
+                        ""
+                    }
+                    val upstream = error?.optString("message").orEmpty().ifBlank { rawBody }
                     throw McpTransportException(
                         stage = stage,
                         code = "MCP_HTTP_${response.code}",
-                        message = "MCP 请求失败：HTTP ${response.code} ${response.message.take(MAX_TEXT_CHARS)}",
+                        message = "MCP 请求失败：HTTP ${response.code} ${response.message.take(MAX_TEXT_CHARS)}"
+                            .let { if (upstream.isBlank()) it else "$it — $upstream" },
                         httpStatus = response.code,
                         jsonRpcCode = error?.optInt("code"),
-                        upstreamMessage = error?.optString("message").orEmpty().take(MAX_TEXT_CHARS),
+                        upstreamMessage = upstream.take(MAX_TEXT_CHARS),
                     )
                 }
                 if (payload == null) {
@@ -541,6 +604,19 @@ internal class McpHttpTransport(
         const val MAX_RESPONSE_BYTES = 1_048_576L
         const val MAX_TEXT_CHARS = 300
         const val MAX_TOOLS_PER_PAGE = 128
+        /**
+         * initialize 的尝试顺序。null 表示不带版本头先问一次。
+         * 覆盖 2024-11 至今全部正式修订，各家服务器认哪个就用哪个。
+         */
+        val PROTOCOL_CANDIDATES: List<String?> = listOf(
+            null,
+            McpProtocolMode.LATEST,
+            McpProtocolMode.LEGACY,
+            "2025-06-18",
+            "2025-03-26",
+            "2024-11-05",
+        )
+
         val SUPPORTED_LEGACY_PROTOCOL_VERSIONS = setOf(
             "2024-11-05",
             "2025-03-26",
