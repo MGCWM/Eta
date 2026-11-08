@@ -1204,6 +1204,26 @@
   <string name="mcp_delete_confirm">Delete %1$s? This cannot be undone.</string>
   <string name="mcp_read_only_tool">Read-only tool</string>
   <string name="mcp_may_modify_data">May modify data or call an external service</string>
+  <string name="mcp_transport_stdio">Run as a local command (STDIO)</string>
+  <string name="mcp_transport_stdio_summary">Start a local process and speak JSON-RPC over stdin/stdout, for npx / uvx style servers</string>
+  <string name="mcp_stdio_command">Command</string>
+  <string name="mcp_stdio_args">Arguments (space separated, quotes allowed)</string>
+  <string name="mcp_stdio_env">Environment (KEY=VALUE, one per line)</string>
+  <string name="mcp_stdio_command_required">Enter the command to launch</string>
+  <string name="mcp_http_headers">Headers (Name: Value, one per line)</string>
+  <string name="mcp_import_json">Import from JSON</string>
+  <string name="mcp_import_json_summary">Paste a Claude Desktop or Minis mcpServers config</string>
+  <string name="mcp_import_json_hint">Paste a JSON object with an mcpServers field. Values may reference environment variables as ${VAR}.</string>
+  <string name="mcp_import_action">Import</string>
+  <string name="mcp_import_done">Imported %1$d servers</string>
+  <string name="mcp_diagnostics_title">Diagnostics · %1$s</string>
+  <string name="mcp_diagnostic_ping">Ping</string>
+  <string name="mcp_diagnostic_tools">List tools</string>
+  <string name="mcp_diagnostic_tool_name">Tool name</string>
+  <string name="mcp_diagnostic_arguments">Arguments (JSON object)</string>
+  <string name="mcp_diagnostic_call">Call tool</string>
+  <string name="mcp_diagnostic_entry">Diagnostics</string>
+  <string name="mcp_diagnostic_entry_summary">Ping, list tools, or call a single tool directly</string>
   <string name="data_backup_title">Data backup</string>
   <string name="data_backup_actions">Backup</string>
   <string name="data_backup_warning_title">Keep the backup file safe</string>

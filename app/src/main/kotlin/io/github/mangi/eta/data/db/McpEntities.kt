@@ -25,6 +25,13 @@ internal data class McpServerEntity(
     @ColumnInfo(name = "last_refreshed_at") val lastRefreshedAt: Long?,
     @ColumnInfo(name = "last_protocol_version") val lastProtocolVersion: String?,
     @ColumnInfo(name = "tools_expire_at") val toolsExpireAt: Long?,
+    @ColumnInfo(name = "transport") val transport: String = "http",
+    @ColumnInfo(name = "command") val command: String = "",
+    @ColumnInfo(name = "args_json") val argsJson: String = "[]",
+    @ColumnInfo(name = "environment_json") val environmentJson: String = "[]",
+    @ColumnInfo(name = "headers_json") val headersJson: String = "[]",
+    @ColumnInfo(name = "startup_timeout_ms") val startupTimeoutMs: Long = 60_000L,
+    @ColumnInfo(name = "request_timeout_ms") val requestTimeoutMs: Long = 120_000L,
 )
 
 private val mcpJson = Json {
@@ -46,6 +53,13 @@ internal fun McpServerSetting.toEntity(): McpServerEntity = McpServerEntity(
     lastRefreshedAt = lastRefreshedAt,
     lastProtocolVersion = lastProtocolVersion,
     toolsExpireAt = toolsExpireAt,
+    transport = transport,
+    command = command,
+    argsJson = mcpJson.encodeToString(ListSerializer(String.serializer()), args),
+    environmentJson = mcpJson.encodeToString(ListSerializer(String.serializer()), environment),
+    headersJson = mcpJson.encodeToString(ListSerializer(String.serializer()), headers),
+    startupTimeoutMs = startupTimeoutMs,
+    requestTimeoutMs = requestTimeoutMs,
 )
 
 internal fun McpServerEntity.toDomain(): McpServerSetting = McpServerSetting(
@@ -66,4 +80,15 @@ internal fun McpServerEntity.toDomain(): McpServerSetting = McpServerSetting(
     lastRefreshedAt = lastRefreshedAt,
     lastProtocolVersion = lastProtocolVersion,
     toolsExpireAt = toolsExpireAt,
+    transport = transport,
+    command = command,
+    args = mcpJson.decodeStringList(argsJson),
+    environment = mcpJson.decodeStringList(environmentJson),
+    headers = mcpJson.decodeStringList(headersJson),
+    startupTimeoutMs = startupTimeoutMs,
+    requestTimeoutMs = requestTimeoutMs,
 )
+
+private fun Json.decodeStringList(raw: String): List<String> = runCatching {
+    decodeFromString(ListSerializer(String.serializer()), raw)
+}.getOrDefault(emptyList())

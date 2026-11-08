@@ -84,8 +84,16 @@ internal fun McpServersScreen(
     val scope = rememberCoroutineScope()
     val servers by McpServerRepository.serversFlow().collectAsState(initial = emptyList())
     var showAdd by remember { mutableStateOf(false) }
+    var showImport by remember { mutableStateOf(false) }
+    var importText by remember { mutableStateOf("") }
+    var importResult by remember { mutableStateOf<String?>(null) }
+    var transportType by remember { mutableStateOf(McpTransportType.HTTP) }
     var name by remember { mutableStateOf("") }
     var url by remember { mutableStateOf("") }
+    var command by remember { mutableStateOf("") }
+    var argsText by remember { mutableStateOf("") }
+    var envText by remember { mutableStateOf("") }
+    var headersText by remember { mutableStateOf("") }
     var token by remember { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -93,10 +101,13 @@ internal fun McpServersScreen(
     val onConfirmAdd: () -> Unit = {
         val normalizedName = name.trim()
         val normalizedUrl = url.trim()
+        val stdio = transportType == McpTransportType.STDIO
         error = when {
             normalizedName.isBlank() -> resources.getString(R.string.mcp_name_required)
-            else -> runCatching { validateMcpEndpoint(normalizedUrl) }
+            stdio && command.isBlank() -> resources.getString(R.string.mcp_stdio_command_required)
+            !stdio -> runCatching { validateMcpEndpoint(normalizedUrl) }
                 .exceptionOrNull()?.message
+            else -> null
         }
         if (error == null) {
             scope.launch {
@@ -106,7 +117,20 @@ internal fun McpServersScreen(
                         val draft = McpServerSetting(
                             id = "",
                             name = normalizedName,
-                            url = normalizedUrl,
+                            url = if (stdio) "" else normalizedUrl,
+                            transport = transportType,
+                            command = if (stdio) command.trim() else "",
+                            args = if (stdio) splitArguments(argsText) else emptyList(),
+                            environment = if (stdio) {
+                                envText.lines().map(String::trim).filter(String::isNotBlank)
+                            } else {
+                                emptyList()
+                            },
+                            headers = if (stdio) {
+                                emptyList()
+                            } else {
+                                headersText.lines().map(String::trim).filter(String::isNotBlank)
+                            },
                             protocolMode = McpProtocolMode.AUTO,
                             authorizationType = if (token.isBlank()) {
                                 McpAuthorizationType.NONE
@@ -123,6 +147,10 @@ internal fun McpServersScreen(
                     showAdd = false
                     name = ""
                     url = ""
+                    command = ""
+                    argsText = ""
+                    envText = ""
+                    headersText = ""
                     token = ""
                     error = null
                     Toast.makeText(
@@ -133,6 +161,48 @@ internal fun McpServersScreen(
                 }.onFailure {
                     error = it.message ?: resources.getString(R.string.mcp_connection_failed)
                 }
+            }
+        }
+    }
+
+    val onImport: () -> Unit = {
+        scope.launch {
+            working = true
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val parsed = McpConfigImport.parse(importText)
+                    val warnings = parsed.warnings.toMutableList()
+                    var added = 0
+                    parsed.servers.forEach { candidate ->
+                        val token = McpEnv.parseHeaders(candidate.headers)
+                            .entries.firstOrNull { it.key.equals("Authorization", ignoreCase = true) }
+                            ?.value
+                            ?.substringAfter("Bearer ", "")
+                            ?.takeIf { it.isNotBlank() }
+                            .orEmpty()
+                        runCatching {
+                            val discovered = McpServerManager.discover(candidate, token)
+                            McpServerRepository.add(discovered, token)
+                            added += 1
+                        }.onFailure { failure ->
+                            warnings += "「${candidate.name}」${failure.message.orEmpty()}"
+                        }
+                    }
+                    added to warnings
+                }
+            }
+            working = false
+            result.onSuccess { (added, warnings) ->
+                importResult = buildString {
+                    append(resources.getString(R.string.mcp_import_done, added))
+                    warnings.forEach { append('\n').append(it) }
+                }
+                if (added > 0) {
+                    showImport = false
+                    importText = ""
+                }
+            }.onFailure {
+                importResult = it.message ?: resources.getString(R.string.mcp_connection_failed)
             }
         }
     }
@@ -184,6 +254,17 @@ internal fun McpServersScreen(
                 CouiPageBottomSpacer()
             }
 
+            Group {
+                CouiPreference(
+                    title = stringResource(R.string.mcp_import_json),
+                    summary = stringResource(R.string.mcp_import_json_summary),
+                    onClick = {
+                        importResult = null
+                        showImport = true
+                    },
+                )
+            }
+
             CouiConfirmDialog(
                 visible = showAdd,
                 title = stringResource(R.string.mcp_add_server),
@@ -196,7 +277,10 @@ internal fun McpServersScreen(
             ) {
                 Column(
                     verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 460.dp)
+                        .verticalScroll(rememberScrollState()),
                 ) {
                     CouiTextField(
                         value = name,
@@ -205,14 +289,50 @@ internal fun McpServersScreen(
                         singleLine = true,
                         enabled = !working,
                     )
-                    CouiTextField(
-                        value = url,
-                        onValueChange = { url = it },
-                        label = stringResource(R.string.mcp_server_url),
-                        singleLine = true,
-                        enabled = !working,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    CouiSwitchPreference(
+                        title = stringResource(R.string.mcp_transport_stdio),
+                        summary = stringResource(R.string.mcp_transport_stdio_summary),
+                        checked = transportType == McpTransportType.STDIO,
+                        onCheckedChange = { stdio ->
+                            transportType = if (stdio) McpTransportType.STDIO else McpTransportType.HTTP
+                        },
                     )
+                    if (transportType == McpTransportType.STDIO) {
+                        CouiTextField(
+                            value = command,
+                            onValueChange = { command = it },
+                            label = stringResource(R.string.mcp_stdio_command),
+                            singleLine = true,
+                            enabled = !working,
+                        )
+                        CouiTextField(
+                            value = argsText,
+                            onValueChange = { argsText = it },
+                            label = stringResource(R.string.mcp_stdio_args),
+                            enabled = !working,
+                        )
+                        CouiTextField(
+                            value = envText,
+                            onValueChange = { envText = it },
+                            label = stringResource(R.string.mcp_stdio_env),
+                            enabled = !working,
+                        )
+                    } else {
+                        CouiTextField(
+                            value = url,
+                            onValueChange = { url = it },
+                            label = stringResource(R.string.mcp_server_url),
+                            singleLine = true,
+                            enabled = !working,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        )
+                        CouiTextField(
+                            value = headersText,
+                            onValueChange = { headersText = it },
+                            label = stringResource(R.string.mcp_http_headers),
+                            enabled = !working,
+                        )
+                    }
                     CouiTextField(
                         value = token,
                         onValueChange = { token = it },
@@ -280,6 +400,22 @@ internal fun McpServersScreen(
                         }
                     }
                 }
+                item(key = "import") {
+                    Card(
+                        modifier = Modifier
+                            .padding(horizontal = 12.dp)
+                            .padding(bottom = 12.dp),
+                    ) {
+                        BasicComponent(
+                            title = stringResource(R.string.mcp_import_json),
+                            summary = stringResource(R.string.mcp_import_json_summary),
+                            onClick = {
+                                importResult = null
+                                showImport = true
+                            },
+                        )
+                    }
+                }
             }
 
             WindowDialog(
@@ -303,15 +439,55 @@ internal fun McpServersScreen(
                             enabled = !working,
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        TextField(
-                            value = url,
-                            onValueChange = { url = it },
-                            label = stringResource(R.string.mcp_server_url),
-                            singleLine = true,
-                            enabled = !working,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                            modifier = Modifier.fillMaxWidth(),
+                        SwitchPreference(
+                            title = stringResource(R.string.mcp_transport_stdio),
+                            summary = stringResource(R.string.mcp_transport_stdio_summary),
+                            checked = transportType == McpTransportType.STDIO,
+                            onCheckedChange = { stdio ->
+                                transportType = if (stdio) McpTransportType.STDIO else McpTransportType.HTTP
+                            },
                         )
+                        if (transportType == McpTransportType.STDIO) {
+                            TextField(
+                                value = command,
+                                onValueChange = { command = it },
+                                label = stringResource(R.string.mcp_stdio_command),
+                                singleLine = true,
+                                enabled = !working,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            TextField(
+                                value = argsText,
+                                onValueChange = { argsText = it },
+                                label = stringResource(R.string.mcp_stdio_args),
+                                enabled = !working,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            TextField(
+                                value = envText,
+                                onValueChange = { envText = it },
+                                label = stringResource(R.string.mcp_stdio_env),
+                                enabled = !working,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        } else {
+                            TextField(
+                                value = url,
+                                onValueChange = { url = it },
+                                label = stringResource(R.string.mcp_server_url),
+                                singleLine = true,
+                                enabled = !working,
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            TextField(
+                                value = headersText,
+                                onValueChange = { headersText = it },
+                                label = stringResource(R.string.mcp_http_headers),
+                                enabled = !working,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                         TextField(
                             value = token,
                             onValueChange = { token = it },
@@ -345,6 +521,22 @@ internal fun McpServersScreen(
             }
         }
     }
+
+    if (showImport) {
+        McpImportDialog(
+            value = importText,
+            onValueChange = { importText = it },
+            result = importResult,
+            busy = working,
+            onConfirm = onImport,
+            onDismiss = {
+                if (!working) {
+                    showImport = false
+                    importResult = null
+                }
+            },
+        )
+    }
 }
 
 @Composable
@@ -361,6 +553,7 @@ internal fun McpServerDetailScreen(
     var pendingRiskyTool by remember { mutableStateOf<McpToolDefinition?>(null) }
     var showDelete by remember { mutableStateOf(false) }
     var showToken by remember { mutableStateOf(false) }
+    var showDiagnostics by remember { mutableStateOf(false) }
     var token by remember { mutableStateOf("") }
 
     val onRefresh: () -> Unit = {
@@ -714,10 +907,54 @@ internal fun McpServerDetailScreen(
             }
         }
     }
+
+    if (showDiagnostics) {
+        server?.let { current ->
+            McpDiagnosticsDialog(
+                server = current,
+                onDismiss = { showDiagnostics = false },
+            )
+        }
+    }
+}
+
+private fun endpointSummary(server: McpServerSetting): String =
+    if (server.isStdio) {
+        (listOf(server.command) + server.args).joinToString(" ")
+    } else {
+        server.url
+    }
+
+/** 按 shell 习惯切分参数：引号内保留空格，引号本身不进入 argv。 */
+private fun splitArguments(raw: String): List<String> {
+    val result = mutableListOf<String>()
+    val current = StringBuilder()
+    var quote: Char? = null
+    raw.forEach { character ->
+        when {
+            quote != null && character == quote -> quote = null
+            quote == null && (character == '"' || character == '\'') -> quote = character
+            quote == null && character.isWhitespace() -> {
+                if (current.isNotEmpty()) {
+                    result += current.toString()
+                    current.clear()
+                }
+            }
+            else -> current.append(character)
+        }
+    }
+    if (current.isNotEmpty()) result += current.toString()
+    return result
 }
 
 @Composable
 private fun toolSummary(tool: McpToolDefinition): String = when {
     tool.readOnlyHint == true -> tool.description.ifBlank { stringResource(R.string.mcp_read_only_tool) }
     else -> tool.description.ifBlank { stringResource(R.string.mcp_may_modify_data) }
+}
+private fun toolSummary(tool: McpToolDefinition): String = when {
+    tool.readOnlyHint == true -> tool.description.ifBlank { stringResource(R.string.mcp_read_only_tool) }
+    else -> tool.description.ifBlank { stringResource(R.string.mcp_may_modify_data) }
+}
+ata) }
 }

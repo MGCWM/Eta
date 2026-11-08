@@ -67,6 +67,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
                         MIGRATION_21_22,
                         MIGRATION_22_23,
                         MIGRATION_23_24,
+                        MIGRATION_24_25,
                     )
                     .addCallback(object : Callback() {
                         override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
@@ -121,6 +122,20 @@ internal abstract class EtaDatabase : RoomDatabase() {
 
         internal val MIGRATION_23_24 = Migration(23, 24) { database ->
             database.execSQL("ALTER TABLE conversations ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0")
+        }
+
+        /**
+         * 24 → 25：MCP 服务器支持 STDIO 传输与自定义环境变量 / 请求头。
+         * 既有记录全部按 HTTP 处理，url 不变，不丢配置。
+         */
+        internal val MIGRATION_24_25 = Migration(24, 25) { database ->
+            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN transport TEXT NOT NULL DEFAULT 'http'")
+            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN command TEXT NOT NULL DEFAULT ''")
+            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN args_json TEXT NOT NULL DEFAULT '[]'")
+            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN environment_json TEXT NOT NULL DEFAULT '[]'")
+            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN headers_json TEXT NOT NULL DEFAULT '[]'")
+            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN startup_timeout_ms INTEGER NOT NULL DEFAULT 60000")
+            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN request_timeout_ms INTEGER NOT NULL DEFAULT 120000")
         }
 
         private fun createTextChunkCleanup(database: androidx.sqlite.db.SupportSQLiteDatabase) {

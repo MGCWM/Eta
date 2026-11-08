@@ -1188,6 +1188,26 @@
   <string name="mcp_delete_confirm">删除 %1$s？此操作无法撤销。</string>
   <string name="mcp_read_only_tool">只读工具</string>
   <string name="mcp_may_modify_data">可能修改数据或访问外部服务</string>
+  <string name="mcp_transport_stdio">使用本地命令（STDIO）</string>
+  <string name="mcp_transport_stdio_summary">启动本地进程，用 stdin/stdout 走 JSON-RPC，适配 npx / uvx 类服务器</string>
+  <string name="mcp_stdio_command">启动命令</string>
+  <string name="mcp_stdio_args">参数（空格分隔，可加引号）</string>
+  <string name="mcp_stdio_env">环境变量（KEY=VALUE，每行一条）</string>
+  <string name="mcp_stdio_command_required">请填写启动命令</string>
+  <string name="mcp_http_headers">请求头（Name: Value，每行一条）</string>
+  <string name="mcp_import_json">从 JSON 导入</string>
+  <string name="mcp_import_json_summary">粘贴 Claude Desktop 或 Minis 的 mcpServers 配置</string>
+  <string name="mcp_import_json_hint">粘贴含 mcpServers 字段的 JSON 对象。值里可以用 ${VAR} 引用环境变量。</string>
+  <string name="mcp_import_action">导入</string>
+  <string name="mcp_import_done">已导入 %1$d 个服务器</string>
+  <string name="mcp_diagnostics_title">诊断 · %1$s</string>
+  <string name="mcp_diagnostic_ping">探活</string>
+  <string name="mcp_diagnostic_tools">列出工具</string>
+  <string name="mcp_diagnostic_tool_name">工具名</string>
+  <string name="mcp_diagnostic_arguments">参数（JSON object）</string>
+  <string name="mcp_diagnostic_call">调用工具</string>
+  <string name="mcp_diagnostic_entry">诊断</string>
+  <string name="mcp_diagnostic_entry_summary">探活、列出工具，或直接调用单个工具</string>
   <string name="data_backup_title">数据备份</string>
   <string name="data_backup_actions">备份</string>
   <string name="data_backup_warning_title">请妥善保管备份文件</string>

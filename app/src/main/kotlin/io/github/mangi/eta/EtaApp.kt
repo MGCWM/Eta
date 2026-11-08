@@ -61,6 +61,7 @@ class EtaApp : Application(), XposedServiceHelper.OnServiceListener {
         AgentMemoryRepository.init(this)
         ProviderRepository.init(this)
         McpServerRepository.init(this)
+        McpRuntime.init(this)
         XposedServiceHelper.registerListener(this)
         applicationScope.launch {
             try {
