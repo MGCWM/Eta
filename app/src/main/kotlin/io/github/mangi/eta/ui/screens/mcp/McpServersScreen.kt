@@ -170,6 +170,7 @@ internal fun McpServersScreen(
 
     val onImport: () -> Unit = {
         scope.launch {
+            try {
             working = true
             val result = withContext(Dispatchers.IO) {
                 try {
@@ -212,6 +213,16 @@ internal fun McpServersScreen(
                 }
             }.onFailure {
                 importResult = it.message ?: resources.getString(R.string.mcp_connection_failed)
+            }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Throwable) {
+                working = false
+                importResult = buildString {
+                    append(failure.javaClass.simpleName).append(": ").append(failure.message.orEmpty())
+                    append('\n')
+                    append(failure.stackTraceToString().take(1200))
+                }
             }
         }
     }

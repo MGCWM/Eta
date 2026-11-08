@@ -12,9 +12,6 @@ import java.io.File
  */
 internal object McpEnv {
 
-    private val VARIABLE = Regex("""\$\{([A-Za-z_][A-Za-z0-9_]*)}|\$([A-Za-z_][A-Za-z0-9_]*)""")
-    private val HEADER_NAME = Regex("""[!#$%&'*+.^_`|~0-9A-Za-z-]+""")
-
     /** 解析 `K=V` 行；未定义的变量保留原文，诊断时能一眼看出漏配。 */
     fun parseAssignments(lines: List<String>): Map<String, String> = buildMap {
         lines.forEach { line ->
@@ -36,20 +33,102 @@ internal object McpEnv {
             val index = trimmed.indexOf(':')
             if (index <= 0) return@forEach
             val name = trimmed.substring(0, index).trim()
-            if (!HEADER_NAME.matches(name)) return@forEach
+            if (!isHeaderName(name)) return@forEach
             put(name, expand(trimmed.substring(index + 1).trim()))
         }
     }
 
-    fun expand(raw: String, lookup: (String) -> String? = System::getenv): String =
-        VARIABLE.replace(raw) { match ->
-            val name = match.groupValues[1].ifEmpty { match.groupValues[2] }
-            lookup(name) ?: match.value
+    /**
+     * 展开 `${VAR}` 与 `$VAR`。
+     *
+     * 手写扫描而不是正则：Android 走的是 ICU 正则，语法比 JVM 严格得多，
+     * 一个未转义的 `}` 就能让类初始化直接抛 ExceptionInInitializerError。
+     */
+    fun expand(raw: String, lookup: (String) -> String? = System::getenv): String {
+        val out = StringBuilder(raw.length)
+        var index = 0
+        while (index < raw.length) {
+            val current = raw[index]
+            if (current != '$' || index == raw.length - 1) {
+                out.append(current)
+                index += 1
+                continue
+            }
+            val next = raw[index + 1]
+            if (next == '{') {
+                val close = raw.indexOf('}', index + 2)
+                if (close > index + 2) {
+                    val name = raw.substring(index + 2, close)
+                    if (isVariableName(name)) {
+                        out.append(lookup(name) ?: raw.substring(index, close + 1))
+                        index = close + 1
+                        continue
+                    }
+                }
+                out.append(current)
+                index += 1
+                continue
+            }
+            if (next.isLetter() || next == '_') {
+                var end = index + 1
+                while (end < raw.length && (raw[end].isLetterOrDigit() || raw[end] == '_')) end += 1
+                val name = raw.substring(index + 1, end)
+                out.append(lookup(name) ?: raw.substring(index, end))
+                index = end
+                continue
+            }
+            out.append(current)
+            index += 1
         }
+        return out.toString()
+    }
 
     /** 配置里出现的变量名，供诊断提示「这些变量没取到值」。 */
-    fun referencedVariables(raw: String): List<String> =
-        VARIABLE.findAll(raw).map { it.groupValues[1].ifEmpty { it.groupValues[2] } }.toList()
+    fun referencedVariables(raw: String): List<String> {
+        val found = mutableListOf<String>()
+        var index = 0
+        while (index < raw.length) {
+            if (raw[index] != '$' || index == raw.length - 1) {
+                index += 1
+                continue
+            }
+            val next = raw[index + 1]
+            if (next == '{') {
+                val close = raw.indexOf('}', index + 2)
+                if (close > index + 2) {
+                    val name = raw.substring(index + 2, close)
+                    if (isVariableName(name)) {
+                        found += name
+                        index = close + 1
+                        continue
+                    }
+                }
+                index += 1
+                continue
+            }
+            if (next.isLetter() || next == '_') {
+                var end = index + 1
+                while (end < raw.length && (raw[end].isLetterOrDigit() || raw[end] == '_')) end += 1
+                found += raw.substring(index + 1, end)
+                index = end
+                continue
+            }
+            index += 1
+        }
+        return found
+    }
+
+    private fun isVariableName(value: String): Boolean =
+        value.isNotEmpty() &&
+            (value.first().isLetter() || value.first() == '_') &&
+            value.all { it.isLetterOrDigit() || it == '_' }
+
+    /** RFC 7230 的 token 规则，用来挡住换行与空格注入。 */
+    private fun isHeaderName(value: String): Boolean {
+        if (value.isEmpty()) return false
+        val separators = "()<>@,;:\\\"/[]?={} \t"
+        return value.all { character -> character.code in 0x21..0x7e && character !in separators }
+    }
 
     fun missingVariables(raw: String, lookup: (String) -> String? = System::getenv): List<String> =
         referencedVariables(raw).filter { lookup(it) == null }.distinct()

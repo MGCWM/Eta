@@ -59,7 +59,7 @@ internal fun McpImportDialog(
                 TextField(
                     value = value,
                     onValueChange = onValueChange,
-                    label = "",
+                    label = "JSON",
                     modifier = Modifier
                         .fillMaxWidth()
                         .heightIn(min = 160.dp, max = 280.dp),
