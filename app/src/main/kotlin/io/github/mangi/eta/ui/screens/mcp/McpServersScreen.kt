@@ -141,16 +141,13 @@ internal fun McpServersScreen(
                                 McpAuthorizationType.BEARER
                             },
                         )
-                        // 先落库再发现：服务器暂时离线、内网地址当前不可达，都不该拦住保存。
-                        val stored = McpServerRepository.add(draft, token)
-                        val warning = runCatching {
-                            McpServerRepository.update(McpServerManager.discover(stored, token))
-                        }.exceptionOrNull()?.let { "已保存，但暂时没连上：${it.message.orEmpty()}" }
-                        stored to warning
+                        // 只做本地写入：网络探测放到 UI 释放之后，避免按钮一直转圈。
+                        McpServerRepository.add(draft, token)
                     }
                 }
                 working = false
-                result.onSuccess { (stored, warning) ->
+                result.onSuccess { stored ->
+                    val pendingToken = token
                     showAdd = false
                     name = ""
                     url = ""
@@ -158,11 +155,19 @@ internal fun McpServersScreen(
                     argsText = ""
                     envText = ""
                     headersText = ""
-                    token = ""
                     error = null
-                    val message = warning
-                        ?: resources.getString(R.string.mcp_server_added, stored.tools.size)
-                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                    Toast.makeText(
+                        context,
+                        resources.getString(R.string.mcp_server_added, 0),
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    // 已落库，工具列表在后台补；Room 的 Flow 会在写入后自动刷新界面。
+                    scope.launch(Dispatchers.IO) {
+                        runCatching {
+                            McpServerRepository.update(McpServerManager.discover(stored, pendingToken))
+                        }
+                    }
+                    token = ""
                 }.onFailure {
                     error = it.message ?: resources.getString(R.string.mcp_connection_failed)
                 }
@@ -178,6 +183,7 @@ internal fun McpServersScreen(
                 try {
                     val parsed = McpConfigImport.parse(importText)
                     val warnings = parsed.warnings.toMutableList()
+                    val imports = mutableListOf<Pair<io.github.mangi.eta.data.model.McpServerSetting, String>>()
                     var added = 0
                     parsed.servers.forEach { candidate ->
                         val token = McpEnv.parseHeaders(candidate.headers)
@@ -187,31 +193,24 @@ internal fun McpServersScreen(
                             ?.takeIf { it.isNotBlank() }
                             .orEmpty()
                         try {
-                            // 先落库，再尽力拉一次工具；连不上只记警告，不影响导入结果。
-                            val stored = McpServerRepository.add(candidate, token)
+                            // 只做本地写入，网络探测统一放到导入结束之后。
+                            imports += McpServerRepository.add(candidate, token) to token
                             added += 1
-                            try {
-                                McpServerRepository.update(McpServerManager.discover(stored, token))
-                            } catch (failure: kotlinx.coroutines.CancellationException) {
-                                throw failure
-                            } catch (failure: Exception) {
-                                warnings += "「${candidate.name}」已保存，暂时没连上：${failure.message.orEmpty()}"
-                            }
                         } catch (failure: kotlinx.coroutines.CancellationException) {
                             throw failure
                         } catch (failure: Exception) {
                             warnings += "「${candidate.name}」${failure.message.orEmpty()}"
                         }
                     }
-                    Result.success(added to warnings)
+                    Result.success(Triple(added, warnings, imports))
                 } catch (failure: kotlinx.coroutines.CancellationException) {
                     throw failure
                 } catch (failure: Exception) {
-                    Result.failure<Pair<Int, List<String>>>(failure)
+                    Result.failure<Triple<Int, List<String>, List<Pair<io.github.mangi.eta.data.model.McpServerSetting, String>>>>(failure)
                 }
             }
             working = false
-            result.onSuccess { (added, warnings) ->
+            result.onSuccess { (added, warnings, pending) ->
                 importResult = buildString {
                     append(resources.getString(R.string.mcp_import_done, added))
                     warnings.forEach { append('\n').append(it) }
@@ -219,6 +218,14 @@ internal fun McpServersScreen(
                 if (added > 0) {
                     showImport = false
                     importText = ""
+                    // 配置已全部落库，工具列表在后台补；Room 的 Flow 会自动刷新列表。
+                    scope.launch(Dispatchers.IO) {
+                        pending.forEach { (stored, bearer) ->
+                            runCatching {
+                                McpServerRepository.update(McpServerManager.discover(stored, bearer))
+                            }
+                        }
+                    }
                 }
             }.onFailure {
                 importResult = it.message ?: resources.getString(R.string.mcp_connection_failed)
