@@ -19,7 +19,7 @@ internal object McpServerManager {
     ): McpServerSetting {
         val transport = McpTransportFactory.create(server, bearerToken, processContext)
         return transport.use { client ->
-            val handshake = client.handshake()
+            // 先列工具：listTools 内部完成协议协商，避免握手与发现各发一次请求。
             val tools = mutableListOf<McpToolDefinition>()
             var cursor: String? = null
             var pages = 0
@@ -34,6 +34,7 @@ internal object McpServerManager {
             }
             val availableNames = tools.mapTo(mutableSetOf()) { it.name }
             val refreshedAt = System.currentTimeMillis()
+            val handshake = client.handshake()
             server.copy(
                 transport = server.transport,
                 tools = tools,

@@ -1,5 +1,6 @@
 package io.github.mangi.eta.agent.mcp
 
+import io.github.mangi.eta.data.model.McpProtocolMode
 import io.github.mangi.eta.data.model.McpServerSetting
 import io.github.mangi.eta.data.model.McpToolDefinition
 import org.json.JSONObject
@@ -29,12 +30,12 @@ internal class McpHttpClient(
     )
 
     fun discoverTools(): Discovery {
-        val handshake = delegate.handshake()
         val tools = mutableListOf<McpToolDefinition>()
         var cursor: String? = null
         var cacheTtlMs: Long? = null
         var pages = 0
         while (pages < MAX_PAGES) {
+            // 第一页顺带完成协议协商，不额外发一次握手请求，请求序列与旧实现一致。
             val page = delegate.listTools(cursor)
             tools += page.tools
             cacheTtlMs = page.cacheTtlMs
@@ -42,11 +43,12 @@ internal class McpHttpClient(
             pages += 1
             if (cursor == null || tools.size >= MAX_TOOLS) break
         }
-        return Discovery(handshake.protocolVersion, tools, cacheTtlMs)
+        val version = delegate.negotiatedProtocol() ?: McpProtocolMode.LATEST
+        return Discovery(version, tools, cacheTtlMs)
     }
 
     fun callTool(tool: McpToolDefinition, arguments: JSONObject): JSONObject =
-        delegate.callTool(tool.name, arguments)
+        delegate.callTool(tool.name, arguments, tool.inputSchemaJson)
 
     override fun close() = delegate.close()
 

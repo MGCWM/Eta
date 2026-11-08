@@ -131,3 +131,14 @@ internal object McpToolParser {
 
 /** 单引号包壳，用于把 argv 拼成 sh -c 命令行。 */
 internal fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
+
+/**
+ * 端点不认现代协议时抛出的信号。
+ *
+ * 与 [McpTransportException] 分开，是为了让 AUTO 模式的降级判断只认「协议形状不对」，
+ * 不把鉴权失败、网络错误与 5xx 一起降级。
+ */
+internal class McpProtocolCompatibilityException(
+    override val message: String,
+    cause: Throwable? = null,
+) : IOException(message, cause)

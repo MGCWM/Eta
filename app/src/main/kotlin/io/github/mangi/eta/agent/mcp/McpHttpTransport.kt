@@ -54,13 +54,31 @@ internal class McpHttpTransport(
     override fun handshake(): McpHandshake {
         capturedHandshake?.let { return it }
         val startedAt = System.currentTimeMillis()
-        val version = negotiatedVersion ?: negotiateVersion()
+        val version = negotiatedVersion ?: when (server.protocolMode) {
+            McpProtocolMode.LEGACY -> initializeLegacy()
+            McpProtocolMode.LATEST -> McpProtocolMode.LATEST.also { negotiatedVersion = it }
+            else -> probeLatestVersion()
+        }
         val result = (handshakeCache ?: McpHandshake(version)).copy(
             protocolVersion = version,
             roundTripMs = System.currentTimeMillis() - startedAt,
         )
         capturedHandshake = result
         return result
+    }
+
+    /** 当前协商到的协议版本，未协商时为 null。诊断与兼容外壳用它回报版本。 */
+    fun negotiatedProtocol(): String? = negotiatedVersion
+
+    /** AUTO 模式探活：拿第一页工具当探针，形状不对就降到 initialize 协商。 */
+    private fun probeLatestVersion(): String = try {
+        listToolsOnce(McpProtocolMode.LATEST, null)
+        McpProtocolMode.LATEST.also { negotiatedVersion = it }
+    } catch (failure: McpProtocolCompatibilityException) {
+        initializeLegacy()
+    } catch (failure: McpTransportException) {
+        if (!isCompatibilityFailure(failure)) throw failure
+        initializeLegacy()
     }
 
     @Volatile
@@ -70,7 +88,27 @@ internal class McpHttpTransport(
     private val schemaByName = mutableMapOf<String, String>()
 
     override fun listTools(cursor: String?): McpToolPage {
-        val version = negotiatedVersion ?: negotiateVersion()
+        negotiatedVersion?.let { return listToolsOnce(it, cursor) }
+        return when (server.protocolMode) {
+            McpProtocolMode.LEGACY -> listToolsOnce(initializeLegacy(), cursor)
+            McpProtocolMode.LATEST -> listToolsOnce(
+                McpProtocolMode.LATEST.also { negotiatedVersion = it },
+                cursor,
+            )
+            else -> try {
+                listToolsOnce(McpProtocolMode.LATEST.also { negotiatedVersion = it }, cursor)
+            } catch (failure: McpProtocolCompatibilityException) {
+                negotiatedVersion = null
+                listToolsOnce(initializeLegacy(), cursor)
+            } catch (failure: McpTransportException) {
+                if (!isCompatibilityFailure(failure)) throw failure
+                negotiatedVersion = null
+                listToolsOnce(initializeLegacy(), cursor)
+            }
+        }
+    }
+
+    private fun listToolsOnce(version: String, cursor: String?): McpToolPage {
         val params = JSONObject().apply {
             cursor?.takeIf { it.isNotBlank() }?.let { put("cursor", it) }
         }
@@ -85,13 +123,12 @@ internal class McpHttpTransport(
             McpStage.LIST_TOOLS,
         )
         if (version == McpProtocolMode.LATEST) {
-            val resultType = result.optString("resultType")
-            if (resultType.isNotBlank() && resultType != "complete") {
-                throw McpTransportException(
-                    stage = McpStage.LIST_TOOLS,
-                    code = "MCP_RESULT_TYPE_UNSUPPORTED",
-                    message = "MCP tools/list 返回了不支持的结果类型：$resultType",
-                )
+            // 旧服务会忽略现代协议元数据、照样用 200 返回，形状不对就得改走 initialize 协商。
+            if (!result.has("resultType") || result.isNull("resultType")) {
+                throw McpProtocolCompatibilityException("MCP tools/list 返回了旧协议结果")
+            }
+            require(result.optString("resultType") == "complete") {
+                "MCP tools/list 返回了不支持的结果类型"
             }
         }
         val page = McpToolParser.parsePage(result, MAX_TOOLS_PER_PAGE)
@@ -99,10 +136,19 @@ internal class McpHttpTransport(
         return page
     }
 
-    override fun callTool(name: String, arguments: JSONObject): JSONObject {
+    override fun callTool(name: String, arguments: JSONObject): JSONObject =
+        callTool(name, arguments, schemaByName[name])
+
+    /**
+     * 带 schema 的调用入口。
+     *
+     * 直接调用工具（没先 listTools）时 schemaByName 是空的，此时必须由调用方把定义里的
+     * inputSchema 传进来，否则 x-mcp-header 参数不会映射成请求头。
+     */
+    fun callTool(name: String, arguments: JSONObject, inputSchemaJson: String?): JSONObject {
         val version = negotiatedVersion ?: negotiateVersion()
         val parameterHeaders = if (version == McpProtocolMode.LATEST) {
-            val schema = schemaByName[name]
+            val schema = inputSchemaJson ?: schemaByName[name]
             if (schema == null) {
                 emptyMap()
             } else {
@@ -162,25 +208,9 @@ internal class McpHttpTransport(
         val resolved = when (mode) {
             McpProtocolMode.LEGACY -> initializeLegacy()
             McpProtocolMode.LATEST -> McpProtocolMode.LATEST.also { negotiatedVersion = it }
-            else -> try {
-                probeLatest()
-                McpProtocolMode.LATEST.also { negotiatedVersion = it }
-            } catch (failure: McpTransportException) {
-                if (!isCompatibilityFailure(failure)) throw failure
-                initializeLegacy()
-            }
+            else -> probeLatestVersion()
         }
         resolved
-    }
-
-    private fun probeLatest() {
-        request(
-            method = "tools/list",
-            params = JSONObject(),
-            protocolVersion = McpProtocolMode.LATEST,
-            sessionId = null,
-            stage = McpStage.HANDSHAKE,
-        )
     }
 
     /**
@@ -446,14 +476,17 @@ internal class McpHttpTransport(
         val source = body.source()
         val dataLines = mutableListOf<String>()
         var totalBytes = 0L
+        var fallback: JSONObject? = null
 
         fun consumeEvent(): JSONObject? {
             if (dataLines.isEmpty()) return null
             val json = runCatching { JSONObject(dataLines.joinToString("\n")) }.getOrNull()
             dataLines.clear()
-            return json?.takeIf { candidate ->
-                expectedId == null || candidate.opt("id")?.toString() == expectedId.toString()
-            }
+            if (json == null || (!json.has("result") && !json.has("error"))) return null
+            if (expectedId == null || json.opt("id")?.toString() == expectedId.toString()) return json
+            // 部分实现固定回一个 id，不能据此把整条响应丢掉；先留作兜底。
+            fallback = json
+            return null
         }
 
         while (true) {
@@ -466,7 +499,7 @@ internal class McpHttpTransport(
                 line.startsWith("data:") -> dataLines += line.removePrefix("data:").removePrefix(" ")
             }
         }
-        return consumeEvent()
+        return consumeEvent() ?: fallback
     }
 
     private fun okio.BufferedSource.readBoundedSseLine(remainingBytes: Long): String? {
