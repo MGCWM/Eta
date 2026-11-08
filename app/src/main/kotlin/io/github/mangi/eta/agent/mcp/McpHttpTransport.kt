@@ -157,9 +157,13 @@ internal class McpHttpTransport(
      * inputSchema 传进来，否则 x-mcp-header 参数不会映射成请求头。
      */
     fun callTool(name: String, arguments: JSONObject, inputSchemaJson: String?): JSONObject {
+        // 只有用户显式选了 LATEST 才允许跳过协商直接发。
+        // AUTO 与 LEGACY 都必须先 initialize：McpRunContext 每个运行周期都会新建
+        // transport，此时 negotiatedVersion 还是 null，若直接假设 LATEST 就会拿
+        // 2026-07-28 去撞只认 2025-06-18 的服务器，每次调用稳定 400。
         val version = negotiatedVersion ?: when (server.protocolMode) {
-            McpProtocolMode.LEGACY -> initializeLegacy()
-            else -> McpProtocolMode.LATEST.also { negotiatedVersion = it }
+            McpProtocolMode.LATEST -> McpProtocolMode.LATEST.also { negotiatedVersion = it }
+            else -> initializeLegacy()
         }
         val parameterHeaders = if (version == McpProtocolMode.LATEST) {
             val schema = inputSchemaJson ?: schemaByName[name]
@@ -187,10 +191,47 @@ internal class McpHttpTransport(
                 McpStage.CALL_TOOL,
             )
         }
-        return if (version in SUPPORTED_LEGACY_PROTOCOL_VERSIONS) {
-            withLegacySessionRetry(invoke)
-        } else {
-            invoke(null)
+        return try {
+            if (version in SUPPORTED_LEGACY_PROTOCOL_VERSIONS) {
+                withLegacySessionRetry(invoke)
+            } else {
+                invoke(null)
+            }
+        } catch (failure: McpTransportException) {
+            // 自愈：缓存里的版本已经不能用了（服务器升级、换了端点、DB 里留着别人的
+            // 版本号），丢一次缓存重新协商，用新版本重发一次再决定成败。
+            if (!isVersionRejection(failure)) throw failure
+            synchronized(lifecycleLock) {
+                negotiatedVersion = null
+                legacySessionId = null
+                handshakeCache = null
+            }
+            val retryVersion = initializeLegacy()
+            if (retryVersion == version) throw failure
+            val parameterHeaders = if (retryVersion == McpProtocolMode.LATEST) {
+                val schema = inputSchemaJson ?: schemaByName[name]
+                if (schema == null) {
+                    emptyMap()
+                } else {
+                    toolHeadersByName.getOrPut(name) {
+                        McpToolHeaders.fromSchema(JSONObject(schema))
+                    }.extract(arguments)
+                }
+            } else {
+                emptyMap()
+            }
+            unwrapResult(
+                request(
+                    method = "tools/call",
+                    name = name,
+                    params = JSONObject().put("name", name).put("arguments", arguments),
+                    protocolVersion = retryVersion,
+                    sessionId = legacySessionId,
+                    stage = McpStage.CALL_TOOL,
+                    additionalHeaders = parameterHeaders,
+                ).json,
+                McpStage.CALL_TOOL,
+            )
         }
     }
 
@@ -364,7 +405,11 @@ internal class McpHttpTransport(
             .apply {
                 // 旧服务器（MT 管理器这类）看到不认识的 Mcp-Method 会直接 400，
                 // 只有现代协议才需要它做路由。首次探活也允许完全省略版本头。
-                if (!omitVersionHeader) header(HEADER_PROTOCOL_VERSION, protocolVersion)
+                // 空串头必判 400（MT 管理器实测：缺头放行、空值拒绝），所以只发非空值。
+                if (!omitVersionHeader) {
+                    protocolVersion.trim().takeIf { it.isNotEmpty() }
+                        ?.let { header(HEADER_PROTOCOL_VERSION, it) }
+                }
                 if (protocolVersion == McpProtocolMode.LATEST) header(HEADER_METHOD, method)
                 name?.let {
                     header(HEADER_NAME, if (protocolVersion == McpProtocolMode.LATEST) encodeMcpHeaderValue(it) else it)
