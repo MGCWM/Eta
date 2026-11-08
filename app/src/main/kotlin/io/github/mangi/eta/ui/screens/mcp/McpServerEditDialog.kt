@@ -214,7 +214,7 @@ internal fun McpServerEditDialog(
                     Text(
                         text = error.orEmpty(),
                         style = MiuixTheme.textStyles.footnote1,
-                        color = MiuixTheme.colorScheme.danger,
+                        color = MiuixTheme.colorScheme.error,
                     )
                 }
 
