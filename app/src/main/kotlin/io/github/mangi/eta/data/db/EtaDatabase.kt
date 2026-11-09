@@ -26,7 +26,7 @@ import androidx.room.migration.Migration
         CharacterEntity::class,
         UserPersonaEntity::class,
     ],
-    version = 25,
+    version = 26,
     exportSchema = false,
 )
 internal abstract class EtaDatabase : RoomDatabase() {
@@ -68,6 +68,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
                         MIGRATION_22_23,
                         MIGRATION_23_24,
                         MIGRATION_24_25,
+                        MIGRATION_25_26,
                     )
                     .addCallback(object : Callback() {
                         override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
@@ -136,6 +137,19 @@ internal abstract class EtaDatabase : RoomDatabase() {
             database.execSQL("ALTER TABLE mcp_servers ADD COLUMN headers_json TEXT NOT NULL DEFAULT '[]'")
             database.execSQL("ALTER TABLE mcp_servers ADD COLUMN startup_timeout_ms INTEGER NOT NULL DEFAULT 60000")
             database.execSQL("ALTER TABLE mcp_servers ADD COLUMN request_timeout_ms INTEGER NOT NULL DEFAULT 120000")
+        }
+
+        /**
+         * 25 → 26：上游 3.4.1 的会话性能统计列。
+         */
+        internal val MIGRATION_25_26 = Migration(25, 26) { database ->
+            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN step_count INTEGER")
+            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN llm_ms INTEGER")
+            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN tool_ms INTEGER")
+            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN ttft_ms INTEGER")
+            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN ttft_steps INTEGER")
+            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN decode_ms INTEGER")
+            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN decode_tokens INTEGER")
         }
 
         private fun createTextChunkCleanup(database: androidx.sqlite.db.SupportSQLiteDatabase) {
