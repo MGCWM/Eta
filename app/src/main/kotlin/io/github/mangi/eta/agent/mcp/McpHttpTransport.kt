@@ -122,7 +122,8 @@ internal class McpHttpTransport(
 
     private fun listToolsOnce(version: String, cursor: String?): McpToolPage {
         val params = JSONObject().apply {
-            cursor?.takeIf { it.isNotBlank() }?.let { put("cursor", it) }
+            // 规范把游标当不透明字符串：空串也是合法游标，只有 null 才表示「不加」。
+            cursor?.let { put("cursor", it) }
         }
         val fetch = if (version == McpProtocolMode.LATEST) {
             request(
@@ -660,7 +661,7 @@ internal class McpHttpTransport(
         const val HEADER_SESSION_ID = "Mcp-Session-Id"
         const val MAX_RESPONSE_BYTES = 1_048_576L
         const val MAX_TEXT_CHARS = 300
-        const val MAX_TOOLS_PER_PAGE = 2048
+        const val MAX_TOOLS_PER_PAGE = 8192
         /**
          * initialize 的尝试顺序。null 表示不带版本头先问一次。
          * 覆盖 2024-11 至今全部正式修订，各家服务器认哪个就用哪个。

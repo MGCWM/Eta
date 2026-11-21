@@ -321,7 +321,7 @@ internal class McpStdioTransport(
         const val CLIENT_NAME = "Eta"
         const val CLIENT_VERSION = "1"
         const val QUEUE_CAPACITY = 256
-        const val MAX_TOOLS_PER_PAGE = 2048
+        const val MAX_TOOLS_PER_PAGE = 8192
         const val MAX_TEXT_CHARS = 300
         const val MAX_LINE_CHARS = 500
         const val MAX_INSTRUCTIONS_CHARS = 4_000
