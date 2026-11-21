@@ -99,8 +99,8 @@ internal class McpRunSnapshot(
          * 用户只会看到「某个服务器突然没工具」。这里放宽到 256（多数模型的 tool 上限），
          * 单服务器 128，超出部分记录在 [skippedServers] 里由诊断入口展示。
          */
-        private const val MAX_RUN_TOOLS = 256
-        private const val MAX_TOOLS_PER_SERVER = 128
+        private const val MAX_RUN_TOOLS = 4096
+        private const val MAX_TOOLS_PER_SERVER = 2048
     }
 }
 
