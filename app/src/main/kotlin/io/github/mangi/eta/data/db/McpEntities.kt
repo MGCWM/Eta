@@ -5,6 +5,7 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 import io.github.mangi.eta.data.model.McpDiscoveryTruncation
 import io.github.mangi.eta.data.model.McpServerSetting
+import io.github.mangi.eta.data.model.McpTimeouts
 import io.github.mangi.eta.data.model.McpToolDefinition
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.SetSerializer
@@ -61,10 +62,7 @@ internal fun McpServerSetting.toEntity(): McpServerEntity = McpServerEntity(
     argsJson = mcpJson.encodeToString(ListSerializer(String.serializer()), args),
     environmentJson = mcpJson.encodeToString(ListSerializer(String.serializer()), environment),
     headersJson = mcpJson.encodeToString(ListSerializer(String.serializer()), headers),
-    requestTimeoutMs = requestTimeoutMs?.coerceIn(
-        McpTimeouts.MIN_TIMEOUT_MS,
-        McpTimeouts.MAX_REQUEST_MS,
-    ) ?: McpTimeouts.DEFAULT_REQUEST_MS,
+    requestTimeoutMs = requestTimeoutMs,
 )
 
 internal fun McpServerEntity.toDomain(): McpServerSetting = McpServerSetting(
@@ -91,7 +89,8 @@ internal fun McpServerEntity.toDomain(): McpServerSetting = McpServerSetting(
     args = decodeStringList(argsJson),
     environment = decodeStringList(environmentJson),
     headers = decodeStringList(headersJson),
-    requestTimeoutMs = requestTimeoutMs,
+    requestTimeoutMs = (requestTimeoutMs ?: McpTimeouts.DEFAULT_REQUEST_MS)
+        .coerceIn(McpTimeouts.MIN_TIMEOUT_MS, McpTimeouts.MAX_REQUEST_MS),
 )
 
 private fun decodeStringList(raw: String): List<String> = runCatching {

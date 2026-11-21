@@ -461,6 +461,7 @@ internal fun McpServersScreen(
                             }
                         }
                     }
+                }
                 item(key = "import") {
                     SmallTitle(stringResource(R.string.mcp_import_section))
                     Card(
@@ -474,7 +475,6 @@ internal fun McpServersScreen(
                             onClick = { showImport = true },
                         )
                     }
-                }
                 }
             }
         }
@@ -1037,6 +1037,10 @@ internal fun McpServerDetailScreen(
             McpServerEditDialog(
                 server = current,
                 onDismiss = {
+                    showEdit = false
+                    tokenState.clearText()
+                },
+                onSaved = {
                     showEdit = false
                     tokenState.clearText()
                 },
