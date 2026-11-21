@@ -83,7 +83,7 @@ internal class McpHttpClient(
         tool.name.length + tool.title.length + tool.description.length +
             tool.inputSchemaJson.length + 128
 
-    private companion object {
+    internal companion object {
         const val MAX_DISCOVERED_TOOLS = 2_048
         const val MAX_LIST_PAGES = 64
         const val MAX_CATALOG_CHARS = 2_000_000
