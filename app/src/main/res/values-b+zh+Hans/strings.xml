@@ -1555,7 +1555,6 @@
   <string name="scheduled_action_stop">停止运行</string>
   <string name="mcp_diagnostics_summary">探活、列出工具，或直接调一个</string>
   <string name="mcp_import_section">导入</string>
-  <string name="mcp_err_server_not_found">MCP 服务器不存在</string>
   <plurals name="mcp_saved_servers">
     <item quantity="other">已保存 %1$d 个服务器</item>
   </plurals>

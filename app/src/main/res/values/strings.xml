@@ -1574,7 +1574,6 @@
   <string name="scheduled_action_stop">Stop</string>
   <string name="mcp_diagnostics_summary">Ping, list tools, or call one directly</string>
   <string name="mcp_import_section">Import</string>
-  <string name="mcp_err_server_not_found">MCP server not found</string>
   <plurals name="mcp_saved_servers">
     <item quantity="one">Saved %1$d server</item>
     <item quantity="other">Saved %1$d servers</item>
