@@ -61,7 +61,10 @@ internal fun McpServerSetting.toEntity(): McpServerEntity = McpServerEntity(
     argsJson = mcpJson.encodeToString(ListSerializer(String.serializer()), args),
     environmentJson = mcpJson.encodeToString(ListSerializer(String.serializer()), environment),
     headersJson = mcpJson.encodeToString(ListSerializer(String.serializer()), headers),
-    requestTimeoutMs = requestTimeoutMs,
+    requestTimeoutMs = requestTimeoutMs?.coerceIn(
+        McpTimeouts.MIN_TIMEOUT_MS,
+        McpTimeouts.MAX_REQUEST_MS,
+    ) ?: McpTimeouts.DEFAULT_REQUEST_MS,
 )
 
 internal fun McpServerEntity.toDomain(): McpServerSetting = McpServerSetting(

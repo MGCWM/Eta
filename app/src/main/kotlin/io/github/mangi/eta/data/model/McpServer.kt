@@ -19,6 +19,15 @@ internal object McpTransportType {
     const val STDIO = "stdio"
 }
 
+/** STDIO 与 HTTP 的等待上限，集中一处便于诊断页展示。 */
+internal object McpTimeouts {
+    const val MIN_TIMEOUT_MS = 5_000L
+    const val DEFAULT_STARTUP_MS = 60_000L
+    const val DEFAULT_REQUEST_MS = 120_000L
+    const val MAX_STARTUP_MS = 900_000L
+    const val MAX_REQUEST_MS = 600_000L
+}
+
 
 internal enum class McpDiscoveryTruncation(val wireValue: String) {
     TOOL_LIMIT("tool_limit"),
@@ -67,8 +76,21 @@ internal data class McpServerSetting(
     val args: List<String> = emptyList(),
     val environment: List<String> = emptyList(),
     val headers: List<String> = emptyList(),
-    val requestTimeoutMs: Long? = null,
+    /** STDIO 首次 initialize 等待上限。 */
+    val startupTimeoutMs: Long = McpTimeouts.DEFAULT_STARTUP_MS,
+    /** 单次列出工具或调用工具的等待上限。 */
+    val requestTimeoutMs: Long = McpTimeouts.DEFAULT_REQUEST_MS,
 ) {
+    val isStdio: Boolean get() = transport == McpTransportType.STDIO
+
+    /** 配置完整性检查，供保存与诊断共用。 */
+    fun validate(): String? = when {
+        name.isBlank() -> "服务器名称不能为空"
+        isStdio && command.isBlank() -> "STDIO 服务器需要填写启动命令"
+        !isStdio && url.isBlank() -> "HTTP 服务器需要填写地址"
+        else -> null
+    }
+
     /** STDIO 类型没有 URL，展示与摘要都走这里。 */
     val endpointSummary: String
         get() = if (transport == McpTransportType.STDIO) {
