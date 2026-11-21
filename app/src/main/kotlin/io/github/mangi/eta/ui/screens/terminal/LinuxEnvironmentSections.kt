@@ -11,18 +11,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.itos.coui.layout.CouiPageDefaults
-import com.itos.coui.layout.Divider
-import com.itos.coui.layout.Group
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.terminal.LinuxDistribution
 import io.github.mangi.eta.agent.terminal.LinuxExecutionBackend
 import io.github.mangi.eta.data.model.AppearanceUiStyle
 import io.github.mangi.eta.ui.app.LocalUiStyle
+import io.github.mangi.eta.ui.components.EtaGlassSpinnerPreference
 import io.github.mangi.eta.ui.components.coui.CouiButton
 import io.github.mangi.eta.ui.components.coui.CouiButtonRole
 import io.github.mangi.eta.ui.components.coui.CouiDropdownPreference
+import io.github.mangi.eta.ui.components.coui.CouiPageDefaults
 import io.github.mangi.eta.ui.components.coui.CouiPreference
+import io.github.mangi.eta.ui.components.coui.CouiPreferenceGroup
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -30,7 +30,6 @@ import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.preference.WindowSpinnerPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -105,8 +104,10 @@ internal fun LinuxEnvironmentStatusCard(
 
     when (uiStyle) {
         AppearanceUiStyle.COUI -> {
-            Group {
-                body()
+            CouiPreferenceGroup {
+                item {
+                    body()
+                }
             }
         }
         AppearanceUiStyle.MIUIX -> {
@@ -135,34 +136,39 @@ internal fun LinuxEnvironmentConfiguration(
     val backends = listOf(LinuxExecutionBackend.PROOT, LinuxExecutionBackend.CHROOT)
     when (LocalUiStyle.current) {
         AppearanceUiStyle.COUI -> {
-            Group(title = stringResource(R.string.linux_environment_configuration)) {
-                CouiDropdownPreference(
-                    title = stringResource(R.string.linux_distribution_title),
-                    items = distributions.map { it.displayName() },
-                    selectedIndex = distributions.indexOf(distribution),
-                    enabled = enabled,
-                    onSelectedIndexChange = { onDistributionSelected(distributions[it]) },
-                )
-                Divider()
-                if (rootGranted || backend == LinuxExecutionBackend.CHROOT) {
+            CouiPreferenceGroup(title = stringResource(R.string.linux_environment_configuration)) {
+                item {
                     CouiDropdownPreference(
-                        title = stringResource(R.string.capability_linux_backend),
-                        items = backends.map { it.displayName() },
-                        selectedIndex = backends.indexOf(backend),
+                        title = stringResource(R.string.linux_distribution_title),
+                        items = distributions.map { it.displayName() },
+                        selectedIndex = distributions.indexOf(distribution),
                         enabled = enabled,
-                        onSelectedIndexChange = { index ->
-                            val chosen = backends.getOrNull(index) ?: return@CouiDropdownPreference
-                            if (chosen == LinuxExecutionBackend.PROOT || rootGranted) {
-                                onBackendSelected(chosen)
-                            }
-                        },
+                        onSelectedIndexChange = { onDistributionSelected(distributions[it]) },
                     )
+                }
+                if (rootGranted || backend == LinuxExecutionBackend.CHROOT) {
+                    item {
+                        CouiDropdownPreference(
+                            title = stringResource(R.string.capability_linux_backend),
+                            items = backends.map { it.displayName() },
+                            selectedIndex = backends.indexOf(backend),
+                            enabled = enabled,
+                            onSelectedIndexChange = { index ->
+                                val chosen = backends.getOrNull(index) ?: return@CouiDropdownPreference
+                                if (chosen == LinuxExecutionBackend.PROOT || rootGranted) {
+                                    onBackendSelected(chosen)
+                                }
+                            },
+                        )
+                    }
                 } else {
-                    CouiPreference(
-                        title = stringResource(R.string.capability_linux_backend),
-                        value = backend.displayName(),
-                        showChevron = false,
-                    )
+                    item {
+                        CouiPreference(
+                            title = stringResource(R.string.capability_linux_backend),
+                            value = backend.displayName(),
+                            showChevron = false,
+                        )
+                    }
                 }
             }
         }
@@ -172,7 +178,7 @@ internal fun LinuxEnvironmentConfiguration(
                     .padding(horizontal = 12.dp)
                     .padding(bottom = 12.dp),
             ) {
-                WindowSpinnerPreference(
+                EtaGlassSpinnerPreference(
                     title = stringResource(R.string.linux_distribution_title),
                     items = distributions.map {
                         DropdownItem(
@@ -190,7 +196,7 @@ internal fun LinuxEnvironmentConfiguration(
                     onSelectedIndexChange = { onDistributionSelected(distributions[it]) },
                 )
                 if (rootGranted || backend == LinuxExecutionBackend.CHROOT) {
-                    WindowSpinnerPreference(
+                    EtaGlassSpinnerPreference(
                         title = stringResource(R.string.capability_linux_backend),
                         items = backends.map {
                             DropdownItem(

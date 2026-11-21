@@ -26,7 +26,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [33, 36])
+@Config(sdk = [34, 36])
 class AgentRuntimeWireTest {
     @Test
     fun searchSuggestionsCapabilityIsOptionalAndHtmlIsNeverDurable() {
@@ -104,6 +104,19 @@ class AgentRuntimeWireTest {
             AgentEvent.ContextCompaction("manual", "started"),
             AgentEvent.ContextCompaction("automatic", "completed", tokensBefore = 765_000),
             AgentEvent.ContextCompaction("legacy", "completed", tokensBefore = 9_000, tokensAfter = 2_000),
+            AgentEvent.ContextCompaction(
+                operationId = "rich",
+                phase = "completed",
+                tokensBefore = 100_000,
+                usage = AgentTokenUsage(
+                    inputTokens = 98_000,
+                    outputTokens = 1_200,
+                    cachedTokens = 94_000,
+                    cacheWriteTokens = 1_000,
+                    requestKind = AgentTokenUsage.REQUEST_KIND_COMPACTION,
+                ),
+                archiveId = "fold-2",
+            ),
         )) {
             val bundle = AgentRuntimeWire.eventToBundle(event)
             assertEquals(event.tokensBefore != null, bundle.containsKey("tokens_before"))
@@ -611,7 +624,7 @@ class AgentRuntimeWireTest {
             """{"action":"type","url":"https://user:password@example.com/private?q=token#fragment","text":"secret input"}"""
         )
 
-        assertEquals("输入内容 · example.com", summary)
+        assertEquals("Enter content · example.com", summary)
     }
 
     @Test
@@ -622,13 +635,13 @@ class AgentRuntimeWireTest {
             toolName = "browser_use",
             result = AgentModelClient.ToolResult(content = content.format("false")),
         )
-        assertEquals("失败", failure)
+        assertEquals("Failed", failure)
 
         val success = AgentModelClient.summarizeToolResult(
             toolName = "browser_use",
             result = AgentModelClient.ToolResult(content = content.format("true")),
         )
-        assertEquals("已提取正文 · example.com · 《Example》 · 约 11 字 · 2 个元素 · 已截断", success)
+        assertEquals("Article extracted · example.com · \"Example\" · ~11 chars · 2 elements · Truncated", success)
 
         listOf("user:password", "secret body", "private", "token", "ok=").forEach { leaked ->
             assertTrue("$leaked leaked: $success", !success.contains(leaked))
@@ -642,7 +655,7 @@ class AgentRuntimeWireTest {
             """{"uri":"https://user:password@example.com/private/access_token/value?q=secret#fragment"}"""
         )
 
-        assertEquals("交给外部应用 · https · example.com", summary)
+        assertEquals("Open in external app · https · example.com", summary)
     }
 
     @Test
@@ -652,6 +665,7 @@ class AgentRuntimeWireTest {
                 round = 2,
                 kind = AgentEvent.AssistantBlockKind.THINKING,
                 index = 0,
+                startedAtEpochMs = 1_760_000_000_000L,
             ),
             AgentEvent.AssistantBlockDelta(
                 round = 2,
@@ -666,6 +680,7 @@ class AgentRuntimeWireTest {
                 index = 0,
                 contentChars = 4,
                 replacementContent = "思考",
+                elapsedMs = 4_200L,
             ),
             AgentEvent.AssistantReceived(
                 round = 2,
@@ -681,6 +696,8 @@ class AgentRuntimeWireTest {
                     outputTokens = 320,
                     reasoningTokens = 80,
                     cachedTokens = 900,
+                    cacheWriteTokens = 150,
+                    requestKind = AgentTokenUsage.REQUEST_KIND_CHAT,
                 ),
             ),
             AgentEvent.ToolStarted(
@@ -712,7 +729,16 @@ class AgentRuntimeWireTest {
 
         events.forEach { event ->
             assertEquals(event, AgentRuntimeWire.eventFromBundle(AgentRuntimeWire.eventToBundle(event)))
+            assertEquals(event, AgentEventJsonCodec.decode(AgentEventJsonCodec.encode(event)))
         }
+        val shortEnd = AgentEvent.AssistantBlockEnd(
+            round = 1,
+            kind = AgentEvent.AssistantBlockKind.THINKING,
+            index = 0,
+            contentChars = 2,
+            elapsedMs = 500L,
+        )
+        assertEquals(shortEnd, AgentEventJsonCodec.decode(AgentEventJsonCodec.encode(shortEnd)))
     }
 
     @Test
@@ -740,7 +766,7 @@ class AgentRuntimeWireTest {
     fun entryHandoffBundleRoundTripPreservesEntrySurfacePolicy() {
         val handoff = AgentRuntimeWire.EntryHandoff(
             id = "handoff-1",
-            source = "breeno",
+            source = AgentRuntimeWire.ETA_VOICE_HANDOFF_SOURCE,
             payload = """{"userText":"打开微信"}""",
             dismissEntrySurfaceOnForegroundOperation = true,
         )
@@ -766,28 +792,11 @@ class AgentRuntimeWireTest {
     }
 
     @Test
-    fun legacyBreenoHandoffDefaultsToDismissingEntrySurface() {
+    fun missingDismissFlagDefaultsToKeepingEntrySurfaceVisible() {
         val bundle = AgentRuntimeWire.toBundle(
             AgentRuntimeWire.EntryHandoff(
                 id = "handoff-1",
-                source = "breeno",
-                payload = "{}",
-            )
-        ).apply {
-            remove("handoff_dismiss_entry_surface_on_foreground_operation")
-        }
-
-        val handoff = AgentRuntimeWire.entryHandoffFromBundle(bundle)
-
-        assertEquals(true, handoff.dismissEntrySurfaceOnForegroundOperation)
-    }
-
-    @Test
-    fun legacyNonBreenoHandoffDefaultsToKeepingEntrySurfaceVisible() {
-        val bundle = AgentRuntimeWire.toBundle(
-            AgentRuntimeWire.EntryHandoff(
-                id = "handoff-1",
-                source = "app",
+                source = AgentRuntimeWire.ETA_VOICE_HANDOFF_SOURCE,
                 payload = "{}",
             )
         ).apply {
@@ -797,5 +806,21 @@ class AgentRuntimeWireTest {
         val handoff = AgentRuntimeWire.entryHandoffFromBundle(bundle)
 
         assertEquals(false, handoff.dismissEntrySurfaceOnForegroundOperation)
+    }
+
+    @Test
+    fun steerBundlesRoundTripTextAndAcceptanceStatus() {
+        val requestBundle = AgentRuntimeWire.steerBundle("run-steer", "改用另一种实现")
+        assertEquals("run-steer", AgentRuntimeWire.runIdFromBundle(requestBundle))
+        assertEquals("改用另一种实现", AgentRuntimeWire.steerTextFromBundle(requestBundle))
+
+        val acceptedBundle = AgentRuntimeWire.steerResponseBundle("run-steer", accepted = true, supplementIndex = 3)
+        assertEquals("run-steer", AgentRuntimeWire.runIdFromBundle(acceptedBundle))
+        assertEquals(true, AgentRuntimeWire.steerAcceptedFromBundle(acceptedBundle))
+        assertEquals(3, AgentRuntimeWire.steerSupplementIndexFromBundle(acceptedBundle))
+
+        val rejectedBundle = AgentRuntimeWire.steerResponseBundle("run-steer", accepted = false)
+        assertEquals(false, AgentRuntimeWire.steerAcceptedFromBundle(rejectedBundle))
+        assertEquals(0, AgentRuntimeWire.steerSupplementIndexFromBundle(rejectedBundle))
     }
 }

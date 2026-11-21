@@ -2,7 +2,6 @@ package io.github.mangi.eta.ui.screens.tools
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,8 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.ExpandMore
-import androidx.compose.material.icons.rounded.Visibility
-import androidx.compose.material.icons.rounded.VisibilityOff
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,17 +25,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.itos.coui.layout.CouiPageDefaults
-import com.itos.coui.layout.Divider
-import com.itos.coui.layout.Footer
-import com.itos.coui.layout.Group
-import com.itos.coui.text.CouiTextKind
-import com.itos.coui.text.Text as CouiText
 import io.github.mangi.eta.R
 import io.github.mangi.eta.data.model.AppearanceUiStyle
 import io.github.mangi.eta.data.model.WebHttpMethod
@@ -46,6 +34,7 @@ import io.github.mangi.eta.data.model.WebToolBackend
 import io.github.mangi.eta.ui.app.LocalUiStyle
 import io.github.mangi.eta.ui.components.ListEmptyState
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
+import io.github.mangi.eta.ui.components.SettingsTextField
 import io.github.mangi.eta.ui.components.StatusError
 import io.github.mangi.eta.ui.components.StatusSuccess
 import io.github.mangi.eta.ui.components.coui.CouiButton
@@ -53,20 +42,22 @@ import io.github.mangi.eta.ui.components.coui.CouiButtonRole
 import io.github.mangi.eta.ui.components.coui.CouiDropdownPreference
 import io.github.mangi.eta.ui.components.coui.CouiIcon
 import io.github.mangi.eta.ui.components.coui.CouiPageBottomSpacer
+import io.github.mangi.eta.ui.components.coui.CouiPageDefaults
 import io.github.mangi.eta.ui.components.coui.CouiPreference
+import io.github.mangi.eta.ui.components.coui.CouiPreferenceFooter
+import io.github.mangi.eta.ui.components.coui.CouiPreferenceGroup
 import io.github.mangi.eta.ui.components.coui.CouiScaffoldPage
-import io.github.mangi.eta.ui.components.coui.CouiTextField
+import io.github.mangi.eta.ui.components.currentGlassOverlayBackdrop
+import io.github.mangi.eta.ui.components.coui.CouiCardDivider as CouiDivider
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
+import top.yukonga.miuix.kmp.glass.GlassDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -92,28 +83,31 @@ internal fun WebToolsSettingsScreen(onBack: () -> Unit) {
                     WebToolsLoadingState(store.message)
                     return@CouiScaffoldPage
                 }
-                Group(title = stringResource(R.string.web_tools_group_service)) {
-                    CouiDropdownPreference(
-                        title = stringResource(R.string.web_tools_search_service),
-                        items = searchBackendLabels,
-                        selectedIndex = settings.searchBackend.ordinal,
-                        onSelectedIndexChange = { index ->
-                            WebToolBackend.entries.getOrNull(index)?.let {
-                                store.edit(settings.copy(searchBackend = it))
-                            }
-                        },
-                    )
-                    Divider()
-                    CouiDropdownPreference(
-                        title = stringResource(R.string.web_tools_fetch_service),
-                        items = fetchBackendLabels,
-                        selectedIndex = settings.fetchBackend.ordinal,
-                        onSelectedIndexChange = { index ->
-                            WebToolBackend.entries.getOrNull(index)?.let {
-                                store.edit(settings.copy(fetchBackend = it))
-                            }
-                        },
-                    )
+                CouiPreferenceGroup(title = stringResource(R.string.web_tools_group_service)) {
+                    item {
+                        CouiDropdownPreference(
+                            title = stringResource(R.string.web_tools_search_service),
+                            items = searchBackendLabels,
+                            selectedIndex = settings.searchBackend.ordinal,
+                            onSelectedIndexChange = { index ->
+                                WebToolBackend.entries.getOrNull(index)?.let {
+                                    store.edit(settings.copy(searchBackend = it))
+                                }
+                            },
+                        )
+                    }
+                    item {
+                        CouiDropdownPreference(
+                            title = stringResource(R.string.web_tools_fetch_service),
+                            items = fetchBackendLabels,
+                            selectedIndex = settings.fetchBackend.ordinal,
+                            onSelectedIndexChange = { index ->
+                                WebToolBackend.entries.getOrNull(index)?.let {
+                                    store.edit(settings.copy(fetchBackend = it))
+                                }
+                            },
+                        )
+                    }
                 }
                 WebToolsNote(
                     stringResource(
@@ -153,20 +147,23 @@ internal fun WebToolsSettingsScreen(onBack: () -> Unit) {
                                 .padding(horizontal = 12.dp)
                                 .padding(bottom = 12.dp),
                         ) {
-                            OverlayDropdownPreference(
+                            val backdrop = currentGlassOverlayBackdrop()
+                            GlassDropdownPreference(
                                 title = stringResource(R.string.web_tools_search_service),
                                 items = searchBackendLabels,
                                 selectedIndex = settings.searchBackend.ordinal,
+                                backdrop = backdrop,
                                 onSelectedIndexChange = { index ->
                                     WebToolBackend.entries.getOrNull(index)?.let {
                                         store.edit(settings.copy(searchBackend = it))
                                     }
                                 },
                             )
-                            OverlayDropdownPreference(
+                            GlassDropdownPreference(
                                 title = stringResource(R.string.web_tools_fetch_service),
                                 items = fetchBackendLabels,
                                 selectedIndex = settings.fetchBackend.ordinal,
+                                backdrop = backdrop,
                                 onSelectedIndexChange = { index ->
                                     WebToolBackend.entries.getOrNull(index)?.let {
                                         store.edit(settings.copy(fetchBackend = it))
@@ -217,7 +214,7 @@ private fun DeepSeekWebSection(store: WebToolsSettingsStore) {
     Column {
         WebSectionGroup(title = stringResource(R.string.web_tools_backend_deepseek)) {
             WebToolsFieldColumn {
-                WebToolsField(
+                SettingsTextField(
                     label = if (store.hasProviderDeepSeekKey) {
                         stringResource(R.string.web_tools_api_key_optional)
                     } else {
@@ -228,7 +225,7 @@ private fun DeepSeekWebSection(store: WebToolsSettingsStore) {
                     onChange = { store.editCredentials(credentials.copy(deepSeekApiKey = it.trim())) },
                 )
             }
-            if (uiStyle == AppearanceUiStyle.COUI) Divider()
+            if (uiStyle == AppearanceUiStyle.COUI) CouiDivider()
             ExpandableHeaderRow(
                 title = stringResource(R.string.speech_advanced),
                 expanded = advanced,
@@ -237,7 +234,7 @@ private fun DeepSeekWebSection(store: WebToolsSettingsStore) {
             )
             AnimatedVisibility(visible = advanced) {
                 WebToolsFieldColumn {
-                    WebToolsField(
+                    SettingsTextField(
                         label = "Base URL",
                         value = settings.deepSeek.baseUrl,
                         onChange = {
@@ -278,12 +275,13 @@ private fun CustomSearchSection(store: WebToolsSettingsStore) {
                         }
                     },
                 )
-                Divider()
+                CouiDivider()
             } else {
-                OverlayDropdownPreference(
+                GlassDropdownPreference(
                     title = stringResource(R.string.web_tools_http_method),
                     items = WebHttpMethod.entries.map { it.name },
                     selectedIndex = config.method.ordinal,
+                    backdrop = currentGlassOverlayBackdrop(),
                     onSelectedIndexChange = { index ->
                         WebHttpMethod.entries.getOrNull(index)?.let {
                             store.edit(settings.copy(customSearch = config.copy(method = it)))
@@ -292,19 +290,19 @@ private fun CustomSearchSection(store: WebToolsSettingsStore) {
                 )
             }
             WebToolsFieldColumn {
-                WebToolsField(
+                SettingsTextField(
                     label = stringResource(R.string.web_tools_endpoint_url),
                     value = config.url,
                     onChange = { store.edit(settings.copy(customSearch = config.copy(url = it.trim()))) },
                 )
-                WebToolsField(
+                SettingsTextField(
                     label = stringResource(R.string.web_tools_api_key_optional),
                     value = credentials.customSearchApiKey,
                     secret = true,
                     onChange = { store.editCredentials(credentials.copy(customSearchApiKey = it.trim())) },
                 )
             }
-            if (uiStyle == AppearanceUiStyle.COUI) Divider()
+            if (uiStyle == AppearanceUiStyle.COUI) CouiDivider()
             ExpandableHeaderRow(
                 title = stringResource(R.string.web_tools_mapping_and_template),
                 expanded = advanced,
@@ -314,7 +312,7 @@ private fun CustomSearchSection(store: WebToolsSettingsStore) {
             AnimatedVisibility(visible = advanced) {
                 WebToolsFieldColumn {
                     if (config.method == WebHttpMethod.POST) {
-                        WebToolsField(
+                        SettingsTextField(
                             label = stringResource(R.string.web_tools_body_template),
                             value = config.bodyTemplate,
                             singleLine = false,
@@ -323,35 +321,35 @@ private fun CustomSearchSection(store: WebToolsSettingsStore) {
                             },
                         )
                     }
-                    WebToolsField(
+                    SettingsTextField(
                         label = stringResource(R.string.web_tools_results_path),
                         value = config.resultsPath,
                         onChange = {
                             store.edit(settings.copy(customSearch = config.copy(resultsPath = it.trim())))
                         },
                     )
-                    WebToolsField(
+                    SettingsTextField(
                         label = stringResource(R.string.web_tools_title_field),
                         value = config.titleField,
                         onChange = {
                             store.edit(settings.copy(customSearch = config.copy(titleField = it.trim())))
                         },
                     )
-                    WebToolsField(
+                    SettingsTextField(
                         label = stringResource(R.string.web_tools_url_field),
                         value = config.urlField,
                         onChange = {
                             store.edit(settings.copy(customSearch = config.copy(urlField = it.trim())))
                         },
                     )
-                    WebToolsField(
+                    SettingsTextField(
                         label = stringResource(R.string.web_tools_snippet_field),
                         value = config.snippetField,
                         onChange = {
                             store.edit(settings.copy(customSearch = config.copy(snippetField = it.trim())))
                         },
                     )
-                    WebToolsField(
+                    SettingsTextField(
                         label = stringResource(R.string.web_tools_custom_headers),
                         value = config.headersText,
                         singleLine = false,
@@ -388,12 +386,13 @@ private fun CustomFetchSection(store: WebToolsSettingsStore) {
                         }
                     },
                 )
-                Divider()
+                CouiDivider()
             } else {
-                OverlayDropdownPreference(
+                GlassDropdownPreference(
                     title = stringResource(R.string.web_tools_http_method),
                     items = WebHttpMethod.entries.map { it.name },
                     selectedIndex = config.method.ordinal,
+                    backdrop = currentGlassOverlayBackdrop(),
                     onSelectedIndexChange = { index ->
                         WebHttpMethod.entries.getOrNull(index)?.let {
                             store.edit(settings.copy(customFetch = config.copy(method = it)))
@@ -402,19 +401,19 @@ private fun CustomFetchSection(store: WebToolsSettingsStore) {
                 )
             }
             WebToolsFieldColumn {
-                WebToolsField(
+                SettingsTextField(
                     label = stringResource(R.string.web_tools_endpoint_url),
                     value = config.url,
                     onChange = { store.edit(settings.copy(customFetch = config.copy(url = it.trim()))) },
                 )
-                WebToolsField(
+                SettingsTextField(
                     label = stringResource(R.string.web_tools_api_key_optional),
                     value = credentials.customFetchApiKey,
                     secret = true,
                     onChange = { store.editCredentials(credentials.copy(customFetchApiKey = it.trim())) },
                 )
             }
-            if (uiStyle == AppearanceUiStyle.COUI) Divider()
+            if (uiStyle == AppearanceUiStyle.COUI) CouiDivider()
             ExpandableHeaderRow(
                 title = stringResource(R.string.web_tools_mapping_and_template),
                 expanded = advanced,
@@ -424,7 +423,7 @@ private fun CustomFetchSection(store: WebToolsSettingsStore) {
             AnimatedVisibility(visible = advanced) {
                 WebToolsFieldColumn {
                     if (config.method == WebHttpMethod.POST) {
-                        WebToolsField(
+                        SettingsTextField(
                             label = stringResource(R.string.web_tools_body_template),
                             value = config.bodyTemplate,
                             singleLine = false,
@@ -433,21 +432,21 @@ private fun CustomFetchSection(store: WebToolsSettingsStore) {
                             },
                         )
                     }
-                    WebToolsField(
+                    SettingsTextField(
                         label = stringResource(R.string.web_tools_content_field),
                         value = config.contentField,
                         onChange = {
                             store.edit(settings.copy(customFetch = config.copy(contentField = it.trim())))
                         },
                     )
-                    WebToolsField(
+                    SettingsTextField(
                         label = stringResource(R.string.web_tools_title_field),
                         value = config.titleField,
                         onChange = {
                             store.edit(settings.copy(customFetch = config.copy(titleField = it.trim())))
                         },
                     )
-                    WebToolsField(
+                    SettingsTextField(
                         label = stringResource(R.string.web_tools_custom_headers),
                         value = config.headersText,
                         singleLine = false,
@@ -469,10 +468,11 @@ private fun WebSectionGroup(
 ) {
     when (LocalUiStyle.current) {
         AppearanceUiStyle.COUI -> {
-            Group(
+            CouiPreferenceGroup(
                 title = title,
-                content = content,
-            )
+            ) {
+                item { androidx.compose.foundation.layout.Column(content = content) }
+            }
         }
         AppearanceUiStyle.MIUIX -> {
             SmallTitle(title)
@@ -554,7 +554,7 @@ private fun WebToolBackend.fetchLabel(): String = stringResource(
 private fun WebToolsNote(text: String, modifier: Modifier = Modifier) {
     when (LocalUiStyle.current) {
         AppearanceUiStyle.COUI -> {
-            Footer(text = text, modifier = modifier)
+            CouiPreferenceFooter(text = text, modifier = modifier)
         }
         AppearanceUiStyle.MIUIX -> {
             Text(
@@ -590,77 +590,6 @@ private fun WebToolsFieldColumn(content: @Composable ColumnScope.() -> Unit) {
         verticalArrangement = Arrangement.spacedBy(12.dp),
         content = content,
     )
-}
-
-@Composable
-private fun WebToolsField(
-    label: String,
-    value: String,
-    secret: Boolean = false,
-    singleLine: Boolean = true,
-    onChange: (String) -> Unit,
-) {
-    var visible by rememberSaveable(label) { mutableStateOf(false) }
-    when (LocalUiStyle.current) {
-        AppearanceUiStyle.COUI -> {
-            val colors = CouiPageDefaults.themeColors()
-            CouiTextField(
-                value = value,
-                onValueChange = onChange,
-                label = label,
-                singleLine = singleLine,
-                maxLines = if (singleLine) 1 else Int.MAX_VALUE,
-                visualTransformation = if (secret && !visible) PasswordVisualTransformation() else VisualTransformation.None,
-                trailingIcon = if (secret) {
-                    {
-                        Box(
-                            modifier = Modifier
-                                .padding(start = 8.dp)
-                                .size(28.dp)
-                                .clickable(role = Role.Button) { visible = !visible },
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            CouiIcon(
-                                imageVector = if (visible) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
-                                contentDescription = stringResource(
-                                    if (visible) R.string.page_hide_bb0e7e else R.string.page_show_71b677,
-                                ),
-                                modifier = Modifier.size(20.dp),
-                                tint = colors.summary,
-                            )
-                        }
-                    }
-                } else {
-                    null
-                },
-            )
-        }
-        AppearanceUiStyle.MIUIX -> {
-            TextField(
-                value = value,
-                onValueChange = onChange,
-                label = label,
-                singleLine = singleLine,
-                maxLines = if (singleLine) 1 else Int.MAX_VALUE,
-                modifier = Modifier.fillMaxWidth(),
-                visualTransformation = if (secret && !visible) PasswordVisualTransformation() else VisualTransformation.None,
-                trailingIcon = if (secret) {
-                    {
-                        IconButton(onClick = { visible = !visible }) {
-                            Icon(
-                                imageVector = if (visible) Icons.Rounded.Visibility else Icons.Rounded.VisibilityOff,
-                                contentDescription = stringResource(
-                                    if (visible) R.string.page_hide_bb0e7e else R.string.page_show_71b677,
-                                ),
-                            )
-                        }
-                    }
-                } else {
-                    null
-                },
-            )
-        }
-    }
 }
 
 @Composable

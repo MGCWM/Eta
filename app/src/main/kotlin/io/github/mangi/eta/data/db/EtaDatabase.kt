@@ -25,8 +25,10 @@ import androidx.room.migration.Migration
         McpServerEntity::class,
         CharacterEntity::class,
         UserPersonaEntity::class,
+        ScheduledTaskEntity::class,
+        ScheduledTaskRunEntity::class,
     ],
-    version = 26,
+    version = 31,
     exportSchema = false,
 )
 internal abstract class EtaDatabase : RoomDatabase() {
@@ -36,6 +38,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
     abstract fun skillDao(): SkillDao
     abstract fun mcpServerDao(): McpServerDao
     abstract fun characterDao(): CharacterDao
+    abstract fun scheduledTaskDao(): ScheduledTaskDao
 
     companion object {
         @Volatile
@@ -69,6 +72,11 @@ internal abstract class EtaDatabase : RoomDatabase() {
                         MIGRATION_23_24,
                         MIGRATION_24_25,
                         MIGRATION_25_26,
+                        MIGRATION_26_27,
+                        MIGRATION_27_28,
+                        MIGRATION_28_29,
+                        MIGRATION_29_30,
+                        MIGRATION_30_31,
                     )
                     .addCallback(object : Callback() {
                         override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) { createTextChunkCleanup(db) }
@@ -125,24 +133,7 @@ internal abstract class EtaDatabase : RoomDatabase() {
             database.execSQL("ALTER TABLE conversations ADD COLUMN is_pinned INTEGER NOT NULL DEFAULT 0")
         }
 
-        /**
-         * 24 → 25：MCP 服务器支持 STDIO 传输与自定义环境变量 / 请求头。
-         * 既有记录全部按 HTTP 处理，url 不变，不丢配置。
-         */
         internal val MIGRATION_24_25 = Migration(24, 25) { database ->
-            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN transport TEXT NOT NULL DEFAULT 'http'")
-            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN command TEXT NOT NULL DEFAULT ''")
-            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN args_json TEXT NOT NULL DEFAULT '[]'")
-            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN environment_json TEXT NOT NULL DEFAULT '[]'")
-            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN headers_json TEXT NOT NULL DEFAULT '[]'")
-            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN startup_timeout_ms INTEGER NOT NULL DEFAULT 60000")
-            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN request_timeout_ms INTEGER NOT NULL DEFAULT 120000")
-        }
-
-        /**
-         * 25 → 26：上游 3.4.1 的会话性能统计列。
-         */
-        internal val MIGRATION_25_26 = Migration(25, 26) { database ->
             database.execSQL("ALTER TABLE conversation_messages ADD COLUMN step_count INTEGER")
             database.execSQL("ALTER TABLE conversation_messages ADD COLUMN llm_ms INTEGER")
             database.execSQL("ALTER TABLE conversation_messages ADD COLUMN tool_ms INTEGER")
@@ -152,10 +143,125 @@ internal abstract class EtaDatabase : RoomDatabase() {
             database.execSQL("ALTER TABLE conversation_messages ADD COLUMN decode_tokens INTEGER")
         }
 
+        internal val MIGRATION_25_26 = Migration(25, 26) { database ->
+            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN cache_write_tokens INTEGER")
+            database.execSQL("ALTER TABLE conversation_messages ADD COLUMN compaction_archive_id TEXT")
+        }
+
+        internal val MIGRATION_26_27 = Migration(26, 27) { database ->
+            database.execSQL("ALTER TABLE mcp_servers ADD COLUMN tools_truncation_reason TEXT")
+        }
+
+        internal val MIGRATION_27_28 = Migration(27, 28) { database ->
+            database.execSQL("ALTER TABLE model_providers ADD COLUMN vertex_project TEXT NOT NULL DEFAULT ''")
+            database.execSQL("ALTER TABLE model_providers ADD COLUMN vertex_location TEXT NOT NULL DEFAULT 'global'")
+        }
+
+        internal val MIGRATION_28_29 = Migration(28, 29) { database ->
+            database.execSQL(
+                "CREATE TABLE IF NOT EXISTS scheduled_tasks (" +
+                    "id TEXT NOT NULL PRIMARY KEY, " +
+                    "name TEXT NOT NULL, " +
+                    "prompt TEXT NOT NULL, " +
+                    "enabled INTEGER NOT NULL, " +
+                    "trigger_kind TEXT NOT NULL, " +
+                    "schedule_json TEXT NOT NULL, " +
+                    "misfire_policy TEXT NOT NULL, " +
+                    "misfire_window_minutes INTEGER NOT NULL, " +
+                    "quiet_hours_json TEXT NOT NULL, " +
+                    "delivery_mode TEXT NOT NULL, " +
+                    "session_mode TEXT NOT NULL, " +
+                    "dedicated_conversation_key TEXT, " +
+                    "model_id TEXT, " +
+                    "reasoning_effort TEXT, " +
+                    "capabilities_json TEXT NOT NULL, " +
+                    "timeout_seconds INTEGER NOT NULL, " +
+                    "memo TEXT NOT NULL, " +
+                    "memo_updated_at INTEGER NOT NULL, " +
+                    "next_run_at INTEGER, " +
+                    "last_run_at INTEGER, " +
+                    "last_status TEXT, " +
+                    "last_summary TEXT NOT NULL, " +
+                    "consecutive_failures INTEGER NOT NULL, " +
+                    "auto_disabled_reason TEXT, " +
+                    "created_at INTEGER NOT NULL, " +
+                    "updated_at INTEGER NOT NULL)"
+            )
+            database.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_scheduled_tasks_enabled_next_run_at " +
+                    "ON scheduled_tasks (enabled, next_run_at)"
+            )
+            database.execSQL(
+                "CREATE TABLE IF NOT EXISTS scheduled_task_runs (" +
+                    "id TEXT NOT NULL PRIMARY KEY, " +
+                    "task_id TEXT NOT NULL, " +
+                    "trigger_source TEXT NOT NULL, " +
+                    "scheduled_for_at INTEGER, " +
+                    "started_at INTEGER NOT NULL, " +
+                    "finished_at INTEGER, " +
+                    "status TEXT NOT NULL, " +
+                    "summary TEXT NOT NULL, " +
+                    "notified INTEGER NOT NULL, " +
+                    "archive_conversation_key TEXT, " +
+                    "model_label TEXT NOT NULL, " +
+                    "FOREIGN KEY(task_id) REFERENCES scheduled_tasks(id) ON DELETE CASCADE)"
+            )
+            database.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_scheduled_task_runs_task_id_started_at " +
+                    "ON scheduled_task_runs (task_id, started_at)"
+            )
+            database.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_scheduled_task_runs_status " +
+                    "ON scheduled_task_runs (status)"
+            )
+        }
+
+        internal val MIGRATION_29_30 = Migration(29, 30) { database ->
+            database.execSQL(
+                "ALTER TABLE scheduled_tasks ADD COLUMN show_running_notification INTEGER NOT NULL DEFAULT 0"
+            )
+        }
+
+        /**
+         * 30 → 31：MCP 支持 STDIO 传输、自定义环境变量 / 请求头 / 超时。
+         *
+         * 幂等写法：从 3.4.1-mcp 升级上来的库里这些列已经存在（当时占用 24→25），
+         * 直接 ALTER 会因重复列名崩溃，所以先查 PRAGMA table_info。
+         */
+        internal val MIGRATION_30_31 = Migration(30, 31) { database ->
+            addColumnIfMissing(database, "mcp_servers", "transport", "TEXT NOT NULL DEFAULT 'http'")
+            addColumnIfMissing(database, "mcp_servers", "command", "TEXT NOT NULL DEFAULT ''")
+            addColumnIfMissing(database, "mcp_servers", "args_json", "TEXT NOT NULL DEFAULT '[]'")
+            addColumnIfMissing(database, "mcp_servers", "environment_json", "TEXT NOT NULL DEFAULT '[]'")
+            addColumnIfMissing(database, "mcp_servers", "headers_json", "TEXT NOT NULL DEFAULT '[]'")
+            addColumnIfMissing(database, "mcp_servers", "request_timeout_ms", "INTEGER")
+        }
+
+        private fun addColumnIfMissing(
+            database: androidx.sqlite.db.SupportSQLiteDatabase,
+            table: String,
+            column: String,
+            declaration: String,
+        ) {
+            val exists = database.query("PRAGMA table_info($table)").use { cursor ->
+                val nameIndex = cursor.getColumnIndex("name")
+                var found = false
+                while (cursor.moveToNext()) {
+                    if (nameIndex >= 0 && cursor.getString(nameIndex) == column) {
+                        found = true
+                        break
+                    }
+                }
+                found
+            }
+            if (!exists) database.execSQL("ALTER TABLE $table ADD COLUMN $column $declaration")
+        }
+
         private fun createTextChunkCleanup(database: androidx.sqlite.db.SupportSQLiteDatabase) {
             mapOf("runtime_results" to "run_id", "runtime_archive_runs" to "archive_run_id",
                 "runtime_inflight_runs" to "run_id", "conversation_context_checkpoints" to "conversation_id",
-                "conversation_messages" to "id", "conversations" to "id")
+                "conversation_messages" to "id", "conversations" to "id",
+                "mcp_servers" to "id")
                 .plus(if (database.version >= 21 || database.query(
                     "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'roleplay_characters'"
                 ).use { it.moveToFirst() }) mapOf("roleplay_characters" to "id", "roleplay_user_persona" to "id") else emptyMap())

@@ -2,6 +2,8 @@ package io.github.mangi.eta.ui.voice
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.maxLengthReject
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -14,21 +16,23 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import com.itos.coui.dialog.CouiDialogDefaults
-import com.itos.coui.layout.Divider
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.voice.validateSpeechSettings
 import io.github.mangi.eta.data.model.AppearanceUiStyle
 import io.github.mangi.eta.data.model.TtsProvider
 import io.github.mangi.eta.ui.app.LocalUiStyle
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
+import io.github.mangi.eta.ui.components.SettingsTextField
 import io.github.mangi.eta.ui.components.coui.CouiDropdownPreference
 import io.github.mangi.eta.ui.components.coui.CouiPageBottomSpacer
 import io.github.mangi.eta.ui.components.coui.CouiPreference
 import io.github.mangi.eta.ui.components.coui.CouiScaffoldPage
+import io.github.mangi.eta.ui.components.currentGlassOverlayBackdrop
+import io.github.mangi.eta.ui.components.coui.CouiCardDivider as CouiDivider
+import io.github.suqi8.coui.kmp.theme.COUITheme as CouiTheme
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.BasicComponentDefaults
-import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
+import top.yukonga.miuix.kmp.glass.GlassDropdownPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -67,7 +71,12 @@ internal fun SpeechSynthesisScreen(onBack: () -> Unit) {
                 }
                 SpeechSaveBlock(store) {
                     if (store.settings.tts != TtsProvider.NONE) {
-                        validateSpeechSettings(store.settings, store.credentials, synthesis = true)
+                        validateSpeechSettings(
+                            store.settings,
+                            store.credentials,
+                            synthesis = true,
+                            hasProviderDeepSeekKey = store.hasProviderDeepSeekKey,
+                        )
                     }
                 }
                 CouiPageBottomSpacer()
@@ -85,10 +94,11 @@ internal fun SpeechSynthesisScreen(onBack: () -> Unit) {
                 }
                 item(key = "service") {
                     SpeechGroupCard(title = stringResource(R.string.speech_group_service)) {
-                        OverlayDropdownPreference(
+                        GlassDropdownPreference(
                             title = stringResource(R.string.speech_tts_service),
                             items = ttsLabels,
                             selectedIndex = settings.tts.ordinal,
+                            backdrop = currentGlassOverlayBackdrop(),
                             onSelectedIndexChange = { index ->
                                 TtsProvider.entries.getOrNull(index)?.let { store.edit(settings.copy(tts = it)) }
                             },
@@ -109,7 +119,12 @@ internal fun SpeechSynthesisScreen(onBack: () -> Unit) {
                 item(key = "save") {
                     SpeechSaveBlock(store) {
                         if (store.settings.tts != TtsProvider.NONE) {
-                            validateSpeechSettings(store.settings, store.credentials, synthesis = true)
+                            validateSpeechSettings(
+                                store.settings,
+                                store.credentials,
+                                synthesis = true,
+                                hasProviderDeepSeekKey = store.hasProviderDeepSeekKey,
+                            )
                         }
                     }
                 }
@@ -142,27 +157,26 @@ private fun SpeechPreviewSection(store: SpeechSettingsStore) {
     Column {
         SpeechGroupCard(title = stringResource(R.string.speech_preview_voice)) {
             SpeechFieldColumn {
-                SpeechField(
+                SettingsTextField(
                     label = stringResource(R.string.speech_preview_text),
                     value = text,
                     singleLine = false,
                     enabled = !store.saving,
+                    inputTransformation = InputTransformation.maxLengthReject(500),
                     onChange = {
-                        if (it.length <= 500) {
-                            store.playback.stop()
-                            text = it
-                        }
+                        store.playback.stop()
+                        text = it
                     },
                 )
             }
             when (LocalUiStyle.current) {
                 AppearanceUiStyle.COUI -> {
-                    val dialogColors = CouiDialogDefaults.themeColors()
-                    Divider()
+
+                    CouiDivider()
                     CouiPreference(
                         title = title,
                         summary = summary,
-                        summaryColor = if (playback.error != null) dialogColors.destructive else Color.Unspecified,
+                        summaryColor = if (playback.error != null) CouiTheme.colorScheme.error else Color.Unspecified,
                         enabled = !store.saving && text.isNotBlank(),
                         showChevron = false,
                         onClick = onPreviewClick,

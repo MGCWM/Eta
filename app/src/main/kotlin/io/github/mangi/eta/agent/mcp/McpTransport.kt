@@ -117,7 +117,12 @@ internal object McpToolParser {
         }
         return McpToolPage(
             tools = tools,
-            nextCursor = source.optString("nextCursor").takeIf { it.isNotBlank() },
+            // 规范要求把游标视为不透明字符串：空串也是合法游标，仅缺失或 null 表示结束。
+            nextCursor = if (source.has("nextCursor") && !source.isNull("nextCursor")) {
+                source.optString("nextCursor")
+            } else {
+                null
+            },
             cacheTtlMs = source.nullableLong("ttlMs")?.coerceAtLeast(0L),
         )
     }

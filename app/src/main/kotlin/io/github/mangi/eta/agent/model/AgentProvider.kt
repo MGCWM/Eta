@@ -32,10 +32,11 @@ internal enum class EndpointKind {
     RESPONSES,
     ANTHROPIC_MESSAGES,
     GEMINI_INTERACTIONS,
+    VERTEX_GENERATE_CONTENT,
 }
 
 internal enum class ProviderRequestPurpose {
-    CHAT, COMPACTION, REPLY_REWRITE, TRANSCRIPT_REFINE;
+    CHAT, COMPACTION, REPLY_REWRITE, TRANSCRIPT_REFINE, TITLE_GENERATION;
 
     val allowsTools: Boolean get() = this == CHAT
 }
@@ -46,6 +47,7 @@ internal data class ProviderRequest(
     val tools: JSONArray,
     val sessionId: String = java.util.UUID.randomUUID().toString(),
     val purpose: ProviderRequestPurpose = ProviderRequestPurpose.CHAT,
+    val toolResultImages: Map<String, List<AgentModelClient.ModelImage>> = emptyMap(),
 ) {
     val effectiveConfig: AgentModelClient.ModelConfig get() {
         val connected = ProviderConnectionProfile.forAuthMode(config.authMode)?.let { profile ->
@@ -57,11 +59,12 @@ internal data class ProviderRequest(
                 apiKey = "",
             )
         } ?: config
-        return if (!purpose.allowsTools) {
+        return if (!purpose.allowsTools && purpose != ProviderRequestPurpose.COMPACTION) {
             connected.copy(hostedWebSearchEnabled = false, extraBodyJson = "", customBody = emptyList())
         } else connected
     }
-    val effectiveTools: JSONArray get() = if (purpose.allowsTools) tools else JSONArray()
+    val effectiveTools: JSONArray get() =
+        if (purpose.allowsTools || purpose == ProviderRequestPurpose.COMPACTION) tools else JSONArray()
 }
 
 internal data class ProviderResponse(

@@ -6,7 +6,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -29,30 +29,25 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
-import com.itos.coui.checkbox.Checkbox as CouiCheckbox
-import com.itos.coui.checkbox.CouiCheckboxDefaults
-import com.itos.coui.dialog.CouiDialogAction
-import com.itos.coui.dialog.CouiDialogPlacement
-import com.itos.coui.dialog.Dialog
-import com.itos.coui.layout.CouiPageDefaults
-import com.itos.coui.menu.rememberCouiWindowBackdrop
-import com.itos.coui.theme.CouiTheme
 import io.github.mangi.eta.R
 import io.github.mangi.eta.data.model.AppearanceUiStyle
 import io.github.mangi.eta.data.model.Model
 import io.github.mangi.eta.data.repository.RemoteModelCatalog
 import io.github.mangi.eta.ui.app.LocalUiStyle
+import io.github.mangi.eta.ui.components.coui.CouiBottomSheet
 import io.github.mangi.eta.ui.components.coui.CouiButton
 import io.github.mangi.eta.ui.components.coui.CouiButtonRole
 import io.github.mangi.eta.ui.components.coui.CouiSearchBarBox
-import io.github.mangi.eta.ui.components.coui.rememberCouiDialogMaterial
+import io.github.mangi.eta.ui.components.currentGlassOverlayBackdrop
+import io.github.mangi.eta.ui.components.glassOverlayFieldBackgroundColor
 import io.github.mangi.eta.ui.model.ModelSearchQuery
+import io.github.suqi8.coui.kmp.basic.Checkbox as CouiCheckbox
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Checkbox
 import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
+import top.yukonga.miuix.kmp.glass.GlassBottomSheet
 import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -70,26 +65,27 @@ internal fun RemoteModelImportSheet(
 ) {
     var shown by remember { mutableStateOf(pending) }
     if (pending != null) shown = pending
+    var selected by remember(pending) { mutableStateOf(emptySet<String>()) }
+    val confirmText = if (selected.isNotEmpty()) {
+        stringResource(R.string.remote_model_import_confirm, selected.size)
+    } else {
+        stringResource(R.string.remote_model_import_pick_hint)
+    }
     when (LocalUiStyle.current) {
         AppearanceUiStyle.COUI -> {
-            val dark = CouiTheme.isDark
-            Dialog(
-                visible = pending != null,
+            CouiBottomSheet(
+                show = pending != null,
                 onDismissRequest = onDismissRequest,
-                dark = dark,
                 title = stringResource(R.string.remote_model_import_title),
-                confirmAction = CouiDialogAction(
-                    text = stringResource(R.string.action_cancel),
-                    onClick = onDismissRequest,
-                ),
-                placement = CouiDialogPlacement.Bottom,
-                material = rememberCouiDialogMaterial(dark),
-                backdrop = rememberCouiWindowBackdrop(),
+                onDismissFinished = { if (pending == null) shown = null },
             ) {
                 shown?.let { current ->
                     key(current) {
                         RemoteModelImportContent(
                             pending = current,
+                            selected = selected,
+                            onSelectionChange = { selected = it },
+                            confirmText = confirmText,
                             onConfirm = { selected -> onConfirm(current, selected) },
                         )
                     }
@@ -97,16 +93,21 @@ internal fun RemoteModelImportSheet(
             }
         }
         AppearanceUiStyle.MIUIX -> {
-            OverlayBottomSheet(
+            GlassBottomSheet(
                 show = pending != null,
+                backdrop = currentGlassOverlayBackdrop(),
                 title = stringResource(R.string.remote_model_import_title),
                 onDismissRequest = onDismissRequest,
+                onDismissFinished = { if (pending == null) shown = null },
                 insideMargin = DpSize(0.dp, 0.dp),
             ) {
                 shown?.let { current ->
                     key(current) {
                         RemoteModelImportContent(
                             pending = current,
+                            selected = selected,
+                            onSelectionChange = { selected = it },
+                            confirmText = confirmText,
                             onConfirm = { selected -> onConfirm(current, selected) },
                         )
                     }
@@ -119,11 +120,13 @@ internal fun RemoteModelImportSheet(
 @Composable
 private fun RemoteModelImportContent(
     pending: RemoteModelImport,
+    selected: Set<String>,
+    onSelectionChange: (Set<String>) -> Unit,
+    confirmText: String,
     onConfirm: (Set<String>) -> Unit,
 ) {
     val candidates = pending.candidates
     var query by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf(emptySet<String>()) }
     val visible = remember(candidates, query) {
         val search = ModelSearchQuery(query)
         candidates.filter { search.matches(it.displayName, it.modelId) }
@@ -136,8 +139,8 @@ private fun RemoteModelImportContent(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(sheetHeight)
-            .then(if (uiStyle == AppearanceUiStyle.COUI) Modifier else Modifier.navigationBarsPadding()),
+            .heightIn(max = sheetHeight)
+            .then(if (uiStyle == AppearanceUiStyle.MIUIX) Modifier.navigationBarsPadding() else Modifier),
     ) {
         Row(
             modifier = Modifier
@@ -153,7 +156,7 @@ private fun RemoteModelImportContent(
             )
             val toggleAll: () -> Unit = {
                 val ids = visible.mapTo(mutableSetOf()) { it.modelId }
-                selected = if (allVisibleSelected) selected - ids else selected + ids
+                onSelectionChange(if (allVisibleSelected) selected - ids else selected + ids)
             }
             val toggleText = stringResource(
                 if (allVisibleSelected) R.string.page_select_none_ba20eb else R.string.page_select_all_3e44b2,
@@ -184,7 +187,6 @@ private fun RemoteModelImportContent(
                 query = query,
                 onQueryChange = { query = it },
                 placeholder = stringResource(R.string.ui_search_model_df5586),
-                backgroundColor = Color.Transparent,
             )
         } else {
             InputField(
@@ -194,6 +196,7 @@ private fun RemoteModelImportContent(
                 expanded = false,
                 onExpandedChange = {},
                 label = stringResource(R.string.ui_search_model_df5586),
+                color = glassOverlayFieldBackgroundColor(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
@@ -203,7 +206,7 @@ private fun RemoteModelImportContent(
         LazyColumn(
             contentPadding = PaddingValues(vertical = 4.dp),
             modifier = Modifier
-                .weight(1f)
+                .weight(1f, fill = false)
                 .fillMaxWidth(),
         ) {
             if (visible.isEmpty()) {
@@ -225,14 +228,10 @@ private fun RemoteModelImportContent(
                     model = model,
                     checked = checked,
                     onToggle = {
-                        selected = if (checked) selected - model.modelId else selected + model.modelId
+                        onSelectionChange(if (checked) selected - model.modelId else selected + model.modelId)
                     },
                 )
             }
-        }
-        val confirmText = when {
-            selected.isNotEmpty() -> stringResource(R.string.remote_model_import_confirm, selected.size)
-            else -> stringResource(R.string.remote_model_import_pick_hint)
         }
         if (uiStyle == AppearanceUiStyle.COUI) {
             CouiButton(
@@ -240,10 +239,7 @@ private fun RemoteModelImportContent(
                 onClick = { onConfirm(selected) },
                 enabled = selected.isNotEmpty(),
                 role = CouiButtonRole.Primary,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 8.dp, bottom = 12.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             )
         } else {
             TextButton(
@@ -297,14 +293,10 @@ private fun RemoteModelRow(
         Spacer(modifier = Modifier.width(12.dp))
         when (LocalUiStyle.current) {
             AppearanceUiStyle.COUI -> {
-                val dark = CouiTheme.isDark
-                val colors = CouiPageDefaults.themeColors(dark)
                 CouiCheckbox(
                     modifier = Modifier,
-                    checked = checked,
-                    colors = CouiCheckboxDefaults.colors(colors.accent, dark),
-                    shape = CouiCheckboxDefaults.shape,
-                    borderShape = CouiCheckboxDefaults.borderShape,
+                    state = if (checked) ToggleableState.On else ToggleableState.Off,
+                    onClick = null,
                 )
             }
             AppearanceUiStyle.MIUIX -> {

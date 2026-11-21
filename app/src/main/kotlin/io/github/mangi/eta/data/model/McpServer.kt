@@ -13,17 +13,24 @@ internal object McpAuthorizationType {
     const val BEARER = "bearer"
 }
 
-/** 传输方式。HTTP 与 STDIO 对外暴露同一套工具语义。 */
+/** 传输方式。HTTP 走网络，STDIO 起本地子进程。 */
 internal object McpTransportType {
     const val HTTP = "http"
     const val STDIO = "stdio"
 }
 
-internal object McpTimeouts {
-    const val DEFAULT_STARTUP_MS = 60_000L
-    const val DEFAULT_REQUEST_MS = 120_000L
-    const val MAX_STARTUP_MS = 900_000L
-    const val MAX_REQUEST_MS = 600_000L
+
+internal enum class McpDiscoveryTruncation(val wireValue: String) {
+    TOOL_LIMIT("tool_limit"),
+    PAGE_LIMIT("page_limit"),
+    SIZE_LIMIT("size_limit"),
+    CURSOR_LOOP("cursor_loop"),
+    ;
+
+    companion object {
+        fun fromWireValue(value: String?): McpDiscoveryTruncation? =
+            entries.firstOrNull { it.wireValue == value }
+    }
 }
 
 @Serializable
@@ -53,22 +60,22 @@ internal data class McpServerSetting(
     val lastRefreshedAt: Long? = null,
     val lastProtocolVersion: String? = null,
     val toolsExpireAt: Long? = null,
-    /** [McpTransportType.HTTP] 或 [McpTransportType.STDIO]。 */
+    val toolsTruncationReason: McpDiscoveryTruncation? = null,
+    // ---- STDIO 传输字段，HTTP 类型全部为默认值 ----
     val transport: String = McpTransportType.HTTP,
-    /** STDIO 启动命令，例如 `npx`、`uvx`、`node`。 */
     val command: String = "",
-    /** STDIO 参数，按 argv 传递，不经 shell 二次解析。 */
     val args: List<String> = emptyList(),
-    /** STDIO 环境变量，`K=V` 形式，值支持 `${VAR}` 展开。 */
     val environment: List<String> = emptyList(),
-    /** HTTP 额外请求头，`K: V` 形式，值支持 `${VAR}` 展开。 */
     val headers: List<String> = emptyList(),
-    /** STDIO 首次 initialize 等待上限。 */
-    val startupTimeoutMs: Long = McpTimeouts.DEFAULT_STARTUP_MS,
-    /** 单次列出工具或调用工具的等待上限。 */
-    val requestTimeoutMs: Long = McpTimeouts.DEFAULT_REQUEST_MS,
+    val requestTimeoutMs: Long? = null,
 ) {
-    val isStdio: Boolean get() = transport == McpTransportType.STDIO
+    /** STDIO 类型没有 URL，展示与摘要都走这里。 */
+    val endpointSummary: String
+        get() = if (transport == McpTransportType.STDIO) {
+            (listOf(command) + args).filter { it.isNotBlank() }.joinToString(" ")
+        } else {
+            url
+        }
 
     val activeTools: List<McpToolDefinition>
         get() = if (!enabled) {
@@ -76,12 +83,4 @@ internal data class McpServerSetting(
         } else {
             tools.filter { it.name in enabledToolNames }
         }
-
-    /** 配置完整性检查，供保存与诊断共用。 */
-    fun validate(): String? = when {
-        name.isBlank() -> "服务器名称不能为空"
-        isStdio && command.isBlank() -> "STDIO 服务器需要填写启动命令"
-        !isStdio && url.isBlank() -> "HTTP 服务器需要填写地址"
-        else -> null
-    }
 }

@@ -1,12 +1,19 @@
 package io.github.mangi.eta.data.repository
 
+import io.github.mangi.eta.agent.model.GeminiInteractionsProvider
+import io.github.mangi.eta.agent.model.ProviderClientFactory
+import io.github.mangi.eta.agent.model.VertexGenerateContentProvider
+import io.github.mangi.eta.agent.runtime.AgentRuntimeWire
 import io.github.mangi.eta.data.datastore.SettingsDataStore
 import io.github.mangi.eta.data.db.EtaDatabase
 import io.github.mangi.eta.data.model.CustomBody
 import io.github.mangi.eta.data.model.CustomHeader
 import io.github.mangi.eta.data.model.CustomProviderSetting
+import io.github.mangi.eta.data.model.GeminiEndpointMode
 import io.github.mangi.eta.data.model.GeminiProviderSetting
 import io.github.mangi.eta.data.model.Model
+import io.github.mangi.eta.data.model.ModelReasoningCapabilities
+import io.github.mangi.eta.data.model.withModels
 import io.github.mangi.eta.data.model.ProviderSetting
 import io.github.mangi.eta.data.model.ProviderSourceTypes
 import io.github.mangi.eta.data.model.ProviderTypes
@@ -15,6 +22,7 @@ import io.github.mangi.eta.data.provider.BuiltinProviders
 import io.github.mangi.eta.ui.pages.providers.ProviderConfigDraft
 import io.github.mangi.eta.ui.pages.providers.providerAccountAuthMode
 import io.github.mangi.eta.ui.pages.providers.toProvider
+import io.github.mangi.eta.ui.pages.providers.withGeminiEndpointMode
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.runBlocking
@@ -72,7 +80,7 @@ class GeminiProviderConfigurationTest {
         assertEquals(ProviderSourceTypes.GEMINI, config.providerSourceType)
         assertEquals("", config.openAiEndpointMode)
         assertEquals(ReasoningEffort.DEFAULT, config.reasoningEffort)
-        assertTrue(requireNotNull(config.reasoningCapabilities).mandatory)
+        assertEquals(listOf(ReasoningEffort.DEFAULT), requireNotNull(config.reasoningCapabilities).selectableEfforts)
         val raw = Json.encodeToString<ProviderSetting>(stored)
         assertEquals(stored, Json.decodeFromString<ProviderSetting>(raw))
     }
@@ -92,6 +100,39 @@ class GeminiProviderConfigurationTest {
     }
 
     @Test
+    fun unknownModelManualEffortsSurvivePersistenceAndRuntimeProjection() = runBlocking {
+        val manual = ModelReasoningCapabilities(supportedEfforts = listOf(ReasoningEffort.LOW, ReasoningEffort.HIGH),
+            defaultEnabled = true, mandatory = true)
+        val provider = GeminiProviderSetting(id = "manual-config", name = "Gemini", models = listOf(
+            Model(id = "future", modelId = "gemini-future", displayName = "未来模型",
+                reasoningOverride = true, reasoningCapabilitiesOverride = manual),
+        ))
+        ProviderRepository.addProvider(provider)
+        val stored = requireNotNull(ProviderRepository.providerById(provider.id))
+        val model = stored.models.single()
+        assertEquals(manual, model.reasoningCapabilitiesOverride)
+        assertEquals(manual, RuntimeConfigRepository.buildRuntimeConfig(stored, model).reasoningCapabilities)
+        assertEquals(listOf(ReasoningEffort.DEFAULT), requireNotNull(
+            RuntimeConfigRepository.buildRuntimeConfig(stored, model.copy(reasoningOverride = null,
+                reasoningCapabilitiesOverride = null)).reasoningCapabilities).selectableEfforts)
+    }
+
+    @Test
+    fun neonAndHydrogenUpgradePreservesExistingModelsAndDoesNotRestoreDeletedPresets() = runBlocking {
+        val neon = Model(id = "existing-neon", modelId = "gemini-4-neon", displayName = "我的 Neon",
+            contextWindowOverride = 200_000)
+        val provider = requireNotNull(BuiltinProviders.providerById(BuiltinProviders.GEMINI_ID))
+            .withModels(listOf(neon))
+        ProviderRepository.addProvider(provider)
+        SettingsDataStore.setOfficialModelCatalogRevision(5)
+        ProviderRepository.ensureBuiltInsMerged()
+        val stored = requireNotNull(ProviderRepository.providerById(provider.id)).models
+        assertEquals(neon, stored.first { it.modelId == "gemini-4-neon" })
+        assertEquals(setOf("gemini-4-neon", "gemini-4-hydrogen"), stored.mapTo(mutableSetOf()) { it.modelId })
+        assertEquals(6, SettingsDataStore.officialModelCatalogRevision())
+    }
+
+    @Test
     fun builtinMergeAppendsGeminiAndPreservesTheSelectedCompatibleConnection() = runBlocking {
         val source = CustomProviderSetting(
             id = "existing-gemini-compatible", name = "原有兼容连接",
@@ -107,7 +148,10 @@ class GeminiProviderConfigurationTest {
         assertEquals(BuiltinProviders.GEMINI_ID, providers.last().id)
         assertEquals(source.id, SettingsDataStore.settings().selectedProviderId)
         assertEquals(source.models.single().id, SettingsDataStore.settings().selectedModelId)
-        assertEquals(3, providers.last().models.size)
+        assertEquals(6, providers.last().models.size)
+        assertTrue(providers.last().models.any { it.modelId == "gemini-4-neon" })
+        assertTrue(providers.last().models.any { it.modelId == "gemini-4-hydrogen" })
+        assertTrue(providers.last().models.any { it.modelId == "gemini-4-carbon" })
     }
 
     @Test
@@ -120,8 +164,67 @@ class GeminiProviderConfigurationTest {
         val updated = draft.toProvider(source)
         assertTrue(updated is GeminiProviderSetting)
         assertEquals(draft, ProviderConfigDraft.from(updated))
-        assertEquals("", draft.endpointMode)
+        assertEquals(GeminiEndpointMode.AI_STUDIO, draft.endpointMode)
         assertNull(providerAccountAuthMode(updated))
+
+        val switchedVertex = ProviderConfigDraft.from(source).withGeminiEndpointMode(GeminiEndpointMode.VERTEX_AI)
+        assertEquals(GeminiEndpointMode.VERTEX_AI, switchedVertex.endpointMode)
+        assertEquals(GeminiProviderSetting.DEFAULT_VERTEX_BASE_URL, switchedVertex.baseUrl)
+        assertEquals(GeminiProviderSetting.DEFAULT_VERTEX_LOCATION, switchedVertex.vertexLocation)
+
+        val customProxySwitched = draft.withGeminiEndpointMode(GeminiEndpointMode.VERTEX_AI)
+        assertEquals("https://proxy.example/v1beta", customProxySwitched.baseUrl)
+    }
+
+    @Test
+    fun vertexConfigurationPersistsRoutesThroughClientFactoryAndRoundTripsWireAndBackup() = runBlocking {
+        val model = Model(id = "vertex-neon", modelId = "gemini-4-neon", displayName = "Gemini 4 Neon")
+        val vertex = GeminiProviderSetting(
+            id = "vertex-provider",
+            name = "Vertex AI",
+            baseUrl = GeminiProviderSetting.DEFAULT_VERTEX_BASE_URL,
+            apiKey = "AQ.fixture-key",
+            endpointMode = GeminiEndpointMode.VERTEX_AI,
+            vertexProject = "my-gcp-project",
+            vertexLocation = "us-central1",
+            hostedWebSearchEnabled = true,
+            models = listOf(model),
+        )
+        ProviderRepository.addProvider(vertex)
+        val stored = requireNotNull(ProviderRepository.providerById(vertex.id)) as GeminiProviderSetting
+        assertTrue(stored.isVertexAi)
+        assertEquals("my-gcp-project", stored.vertexProject)
+        assertEquals("us-central1", stored.vertexLocation)
+
+        val config = RuntimeConfigRepository.buildRuntimeConfig(stored, stored.models.single())
+        assertEquals(GeminiEndpointMode.VERTEX_AI, config.geminiEndpointMode)
+        assertEquals("my-gcp-project", config.vertexProject)
+        assertEquals("us-central1", config.vertexLocation)
+        assertEquals(VertexGenerateContentProvider, ProviderClientFactory.getClient(config))
+        assertEquals(
+            GeminiInteractionsProvider,
+            ProviderClientFactory.getClient(config.copy(geminiEndpointMode = GeminiEndpointMode.AI_STUDIO)),
+        )
+
+        val wireRequest = AgentRuntimeWire.RunRequest(
+            runId = "run-vertex",
+            prompt = "hi",
+            config = config,
+            images = emptyList(),
+        )
+        val roundTripped = AgentRuntimeWire.runRequestFromBundle(AgentRuntimeWire.toBundle(wireRequest, emptyList()))
+        assertEquals(GeminiEndpointMode.VERTEX_AI, roundTripped.config.geminiEndpointMode)
+        assertEquals("my-gcp-project", roundTripped.config.vertexProject)
+        assertEquals("us-central1", roundTripped.config.vertexLocation)
+
+        val output = ByteArrayOutputStream()
+        EtaBackupRepository.export(context, output)
+        ProviderRepository.deleteProvider(vertex.id)
+        EtaBackupRepository.import(context, ByteArrayInputStream(output.toByteArray()))
+        val restored = requireNotNull(ProviderRepository.providerById(vertex.id)) as GeminiProviderSetting
+        assertTrue(restored.isVertexAi)
+        assertEquals("my-gcp-project", restored.vertexProject)
+        assertEquals("us-central1", restored.vertexLocation)
     }
 
     @Test

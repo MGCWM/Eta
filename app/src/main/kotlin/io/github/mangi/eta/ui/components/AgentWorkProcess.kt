@@ -1,6 +1,8 @@
 package io.github.mangi.eta.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -42,6 +44,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,7 +55,9 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -60,7 +65,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.itos.coui.shape.CouiCapsuleShape
+import androidx.compose.ui.unit.sp
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.overlay.toolDisplayName
 import io.github.mangi.eta.data.model.AppearanceUiStyle
@@ -97,6 +102,7 @@ internal fun AgentWorkProcess(
     val steps = remember(messages) { messages.toWorkSteps() }
     // null 表示自动模式；用户点过之后只认手动选择。
     var manualExpanded by rememberSaveable(id) { mutableStateOf<Boolean?>(null) }
+    val onExpandItem = LocalOnChatItemExpand.current
 
     // 以“是否仍是本轮末尾的工作过程”判定收起，而不是 running：思考结束到工具开始之间
     // running 会短暂为 false，按它收起会造成反复开合。展开态在组合期同步推导，与正文
@@ -106,28 +112,22 @@ internal fun AgentWorkProcess(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = if (assistantOverlay) 12.dp else 16.dp, vertical = 2.dp),
+            .padding(horizontal = if (assistantOverlay) 16.dp else 20.dp, vertical = 2.dp),
     ) {
         AgentWorkHeader(
             messages = messages,
             working = active || running,
             expanded = bodyVisible,
-            onClick = { manualExpanded = !bodyVisible },
+            onClick = {
+                val nextExpanded = !bodyVisible
+                if (nextExpanded) onExpandItem()
+                manualExpanded = nextExpanded
+            },
         )
         AnimatedVisibility(
             visible = bodyVisible,
-            enter = fadeIn(tween(160)) + expandVertically(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow,
-                ),
-            ),
-            exit = fadeOut(tween(120)) + shrinkVertically(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow,
-                ),
-            ),
+            enter = ExpandDownEnter,
+            exit = CollapseUpExit,
         ) {
             Column(modifier = Modifier.padding(bottom = 6.dp)) {
                 steps.forEachIndexed { index, step ->
@@ -166,11 +166,15 @@ private fun AgentWorkHeader(
         working -> stringResource(R.string.work_analyzing)
         else -> workSummaryText(summary)
     }
+    val colors = MiuixTheme.colorScheme
+    val isDark = colors.surface.luminance() < 0.5f
+    val mutedInk = colors.onSurface.copy(alpha = if (isDark) 0.56f else 0.52f)
+    val iconInk = colors.onSurface.copy(alpha = if (isDark) 0.50f else 0.45f)
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(min = WorkRowHeight)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -182,20 +186,16 @@ private fun AgentWorkHeader(
                     else -> Icons.Rounded.Checklist
                 },
                 contentDescription = null,
-                modifier = Modifier.size(15.dp),
-                tint = if (working) {
-                    MiuixTheme.colorScheme.primary
-                } else {
-                    MiuixTheme.colorScheme.onSurfaceVariantSummary
-                },
+                modifier = Modifier.size(14.5.dp),
+                tint = if (working) colors.primary else iconInk,
             )
         }
         Spacer(modifier = Modifier.width(WorkGutterGap))
         ShimmerText(
             text = text,
             active = working,
-            style = MiuixTheme.textStyles.body2,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            style = MiuixTheme.textStyles.body2.copy(fontSize = 13.5.sp),
+            color = mutedInk,
             modifier = Modifier.weight(1f, fill = false),
         )
         ExpandChevron(
@@ -203,7 +203,7 @@ private fun AgentWorkHeader(
             contentDescription = stringResource(
                 if (expanded) R.string.work_collapse else R.string.work_expand,
             ),
-            modifier = Modifier.padding(start = 4.dp, end = 8.dp),
+            modifier = Modifier.padding(start = 4.dp, end = 4.dp),
         )
     }
 }
@@ -299,8 +299,8 @@ internal fun ToolActivityStatusUi.nodeTone(): WorkNodeTone = when (this) {
 }
 
 /**
- * 时间线节点：左侧固定宽度的槽位放图标徽章，连线在绘制阶段画出，不参与测量。
- * 节点默认向上接到工作过程标题图标，最后一个节点不向下延伸。
+ * 时间线节点：左侧固定宽度的槽位放轻量状态图标，细导引线在绘制阶段画出，不参与测量。
+ * 已完成节点去掉灰底圆球外壳以降低视觉噪音；仅运行或失败态保留柔和光晕。
  */
 @Composable
 internal fun WorkTimelineNode(
@@ -310,21 +310,37 @@ internal fun WorkTimelineNode(
     connectTop: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val lineColor = MiuixTheme.colorScheme.outline.copy(alpha = 0.6f)
+    val colors = MiuixTheme.colorScheme
+    val isDark = colors.surface.luminance() < 0.5f
+    val lineColor = colors.onSurface.copy(alpha = if (isDark) 0.12f else 0.085f)
+    val hasHalo = tone != WorkNodeTone.Done
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .drawBehind {
                 val x = WorkGutterWidth.toPx() / 2f
                 val stroke = 1.dp.toPx()
-                val gap = 3.dp.toPx()
-                val nodeTop = (WorkRowHeight - WorkNodeSize).toPx() / 2f
-                val nodeBottom = nodeTop + WorkNodeSize.toPx()
-                if (connectTop) {
-                    drawLine(lineColor, Offset(x, 0f), Offset(x, nodeTop - gap), stroke)
+                val visualSize = (if (hasHalo) WorkNodeHaloSize else WorkDoneIconSize).toPx()
+                val gap = (if (hasHalo) 2.5.dp else 3.5.dp).toPx()
+                val nodeTop = (WorkRowHeight.toPx() - visualSize) / 2f
+                val nodeBottom = nodeTop + visualSize
+                if (connectTop && nodeTop - gap > 0f) {
+                    drawLine(
+                        color = lineColor,
+                        start = Offset(x, 0f),
+                        end = Offset(x, nodeTop - gap),
+                        strokeWidth = stroke,
+                        cap = StrokeCap.Round,
+                    )
                 }
-                if (!isLast) {
-                    drawLine(lineColor, Offset(x, nodeBottom + gap), Offset(x, size.height), stroke)
+                if (!isLast && size.height > nodeBottom + gap) {
+                    drawLine(
+                        color = lineColor,
+                        start = Offset(x, nodeBottom + gap),
+                        end = Offset(x, size.height),
+                        strokeWidth = stroke,
+                        cap = StrokeCap.Round,
+                    )
                 }
             },
     ) {
@@ -334,7 +350,7 @@ internal fun WorkTimelineNode(
                 .height(WorkRowHeight),
             contentAlignment = Alignment.Center,
         ) {
-            WorkNodeBadge(icon = icon, tone = tone)
+            WorkNodeBadge(icon = icon, tone = tone, isDark = isDark)
         }
         Spacer(modifier = Modifier.width(WorkGutterGap))
         Box(modifier = Modifier.weight(1f)) {
@@ -344,28 +360,44 @@ internal fun WorkTimelineNode(
 }
 
 @Composable
-private fun WorkNodeBadge(icon: ImageVector, tone: WorkNodeTone) {
-    val (background, tint) = when (tone) {
-        WorkNodeTone.Running -> MiuixTheme.colorScheme.primary.copy(alpha = 0.14f) to
-            MiuixTheme.colorScheme.primary
-        WorkNodeTone.Failed -> StatusError.copy(alpha = 0.12f) to StatusError
-        WorkNodeTone.Done -> MiuixTheme.colorScheme.surfaceContainer to
-            MiuixTheme.colorScheme.onSurfaceVariantSummary
-    }
+private fun WorkNodeBadge(icon: ImageVector, tone: WorkNodeTone, isDark: Boolean) {
+    val colors = MiuixTheme.colorScheme
     val pulse = rememberDrawPhasePulse(active = tone == WorkNodeTone.Running)
-    Box(
-        modifier = Modifier
-            .size(WorkNodeSize)
-            .graphicsLayer { alpha = pulse?.value ?: 1f }
-            .clip(CircleShape)
-            .background(background),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
+    when (tone) {
+        WorkNodeTone.Running -> Box(
+            modifier = Modifier
+                .size(WorkNodeHaloSize)
+                .graphicsLayer { alpha = pulse?.value ?: 1f }
+                .clip(CircleShape)
+                .background(colors.primary.copy(alpha = 0.12f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
+                tint = colors.primary,
+            )
+        }
+        WorkNodeTone.Failed -> Box(
+            modifier = Modifier
+                .size(WorkNodeHaloSize)
+                .clip(CircleShape)
+                .background(StatusError.copy(alpha = 0.10f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
+                tint = StatusError,
+            )
+        }
+        WorkNodeTone.Done -> Icon(
             imageVector = icon,
             contentDescription = null,
-            modifier = Modifier.size(12.dp),
-            tint = tint,
+            modifier = Modifier.size(WorkDoneIconSize),
+            tint = colors.onSurface.copy(alpha = if (isDark) 0.46f else 0.40f),
         )
     }
 }
@@ -452,14 +484,37 @@ internal fun ExpandChevron(
         imageVector = Icons.Rounded.ChevronRight,
         contentDescription = contentDescription,
         modifier = modifier
-            .size(14.dp)
+            .size(13.dp)
             .graphicsLayer { rotationZ = rotation },
-        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.6f),
+        tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f),
     )
 }
 
-/** 时间线标题行与节点徽章共用的几何尺寸，保证图标中心与首行文字中线对齐。 */
-internal val WorkRowHeight: Dp = 32.dp
-internal val WorkGutterWidth: Dp = 22.dp
+/** 时间线标题行与节点槽位共用的几何尺寸，保证图标中心与首行文字中线对齐。 */
+internal val WorkRowHeight: Dp = 30.dp
+internal val WorkGutterWidth: Dp = 18.dp
 internal val WorkGutterGap: Dp = 8.dp
-private val WorkNodeSize: Dp = 20.dp
+private val WorkNodeHaloSize: Dp = 18.dp
+private val WorkDoneIconSize: Dp = 13.5.dp
+
+/**
+ * 用户点击展开列表中的折叠项（工作过程、思考或工具详情）时触发，
+ * 让聊天列表立即释放底部自动跟底，避免展开块被拉到底部而向上顶飞。
+ */
+internal val LocalOnChatItemExpand = staticCompositionLocalOf<() -> Unit> { {} }
+
+internal val ExpandDownEnter: EnterTransition = fadeIn(tween(160)) + expandVertically(
+    animationSpec = spring(
+        dampingRatio = Spring.DampingRatioNoBouncy,
+        stiffness = Spring.StiffnessMediumLow,
+    ),
+    expandFrom = Alignment.Top,
+)
+
+internal val CollapseUpExit: ExitTransition = fadeOut(tween(120)) + shrinkVertically(
+    animationSpec = spring(
+        dampingRatio = Spring.DampingRatioNoBouncy,
+        stiffness = Spring.StiffnessMediumLow,
+    ),
+    shrinkTowards = Alignment.Top,
+)

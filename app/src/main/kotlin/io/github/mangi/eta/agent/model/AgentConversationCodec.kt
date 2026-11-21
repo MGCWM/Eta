@@ -45,6 +45,9 @@ internal object AgentConversationCodec {
                 if (message.contextSummary) target.put("_eta_context_summary", true)
                 if (message.compactedUserTurns > 0) target.put("_eta_compacted_users", message.compactedUserTurns)
                 if (message.summaryThroughUserTurn > 0) target.put("_eta_summary_through_user", message.summaryThroughUserTurn)
+                if (message.compactionArchiveId.isNotBlank()) {
+                    target.put("_eta_compaction_archive_id", message.compactionArchiveId)
+                }
                 when {
                     message.contentJson.isNotBlank() ->
                         target.put("content", JSONTokener(message.contentJson).nextValue())
@@ -69,6 +72,7 @@ internal object AgentConversationCodec {
             contextSummary = message.optBoolean("_eta_context_summary"),
             compactedUserTurns = message.optInt("_eta_compacted_users"),
             summaryThroughUserTurn = message.optInt("_eta_summary_through_user"),
+            compactionArchiveId = message.optString("_eta_compaction_archive_id"),
             content = (contentValue as? String).orEmpty(),
             contentJson = if (
                 contentValue == null ||
@@ -255,8 +259,46 @@ internal object AgentConversationCodec {
             contentJson = sanitizeContentJson(message.contentJson),
             toolCallId = message.toolCallId,
             reasoningContent = message.reasoningContent,
-            toolCallsJson = message.toolCallsJson,
+            toolCallsJson = sanitizeToolCallsJson(message.toolCallsJson),
         )
+
+    /** 防止生图工具调用误传内联 data URL 或原始本地文件路径落入持久 transcript。 */
+    private fun sanitizeToolCallsJson(raw: String): String {
+        if (raw.isBlank() || !raw.contains("generate_image")) return raw
+        val array = runCatching { JSONArray(raw) }.getOrNull() ?: return raw
+        var modified = false
+        for (index in 0 until array.length()) {
+            val call = array.optJSONObject(index) ?: continue
+            val fn = call.optJSONObject("function") ?: continue
+            if (fn.optString("name") != "generate_image") continue
+            val argsRaw = fn.optString("arguments")
+            val args = runCatching { JSONObject(argsRaw) }.getOrNull() ?: continue
+            val refs = args.optJSONArray("reference_images") ?: continue
+            val sanitizedRefs = JSONArray()
+            var refsChanged = false
+            for (i in 0 until refs.length()) {
+                val item = refs.optString(i).trim()
+                val safe = when {
+                    item.startsWith("data:", ignoreCase = true) -> {
+                        refsChanged = true
+                        "<redacted_inline_image>"
+                    }
+                    item.startsWith("/") || item.startsWith("file://", ignoreCase = true) -> {
+                        refsChanged = true
+                        "<redacted_local_path>"
+                    }
+                    else -> item
+                }
+                sanitizedRefs.put(safe)
+            }
+            if (refsChanged) {
+                args.put("reference_images", sanitizedRefs)
+                fn.put("arguments", args.toString())
+                modified = true
+            }
+        }
+        return if (modified) array.toString() else raw
+    }
 
     private fun sanitizeContentJson(raw: String): String {
         if (raw.isBlank()) return ""

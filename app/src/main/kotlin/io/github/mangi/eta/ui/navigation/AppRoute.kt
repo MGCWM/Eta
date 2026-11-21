@@ -22,10 +22,34 @@ sealed interface AppRoute : NavKey {
     data object WebToolsSettings : AppRoute
 
     @Serializable
+    data object ImageGenSettings : AppRoute
+
+    @Serializable
+    data object ImageGenGallery : AppRoute
+
+    @Serializable
     data object Skills : AppRoute
 
     @Serializable
+    data object ScheduledTasks : AppRoute
+
+    @Serializable
+    data class ScheduledTaskDetail(val taskId: String) : AppRoute
+
+    @Serializable
+    data class ScheduledTaskEditor(
+        val taskId: String? = null,
+        val presetId: String? = null,
+    ) : AppRoute
+
+    @Serializable
     data object Subagents : AppRoute
+
+    @Serializable
+    data object ConversationTitleSettings : AppRoute
+
+    @Serializable
+    data object AssistantOverlaySettings : AppRoute
 
     @Serializable
     data object Characters : AppRoute

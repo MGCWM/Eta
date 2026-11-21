@@ -19,16 +19,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowForward
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.automirrored.rounded.ArrowForward
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Language
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,41 +38,42 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
-import com.itos.coui.menu.CouiMenuItem
-import com.itos.coui.menu.Menu
-import com.itos.coui.menu.couiMenuAnchor
-import com.itos.coui.menu.rememberCouiMenuAnchor
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.browser.BrowserSessionSnapshot
 import io.github.mangi.eta.data.model.AppearanceUiStyle
 import io.github.mangi.eta.ui.app.LocalUiStyle
-import top.yukonga.miuix.kmp.basic.DropdownImpl
+import io.github.mangi.eta.ui.components.EtaTopLayer
+import io.github.mangi.eta.ui.components.coui.CouiMenu
+import io.github.mangi.eta.ui.components.coui.CouiMenuItem
+import io.github.mangi.eta.ui.components.coui.couiMenuAnchor
+import io.github.mangi.eta.ui.components.coui.rememberCouiMenuAnchor
+import io.github.mangi.eta.ui.components.currentGlassOverlayBackdrop
 import top.yukonga.miuix.kmp.basic.DropdownItem
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
-import top.yukonga.miuix.kmp.basic.ListPopupColumn
-import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.glass.GlassPopup
+import top.yukonga.miuix.kmp.glass.GlassPopupItem
 import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowListPopup
 
 @Composable
 internal fun BrowserAddressBar(
     snapshot: BrowserSessionSnapshot,
-    address: TextFieldValue,
-    onAddressChange: (TextFieldValue) -> Unit,
+    address: TextFieldState,
     focused: Boolean,
     onFocusChange: (Boolean) -> Unit,
     actionPending: Boolean,
@@ -137,13 +139,12 @@ internal fun BrowserAddressBar(
                     )
                 }
                 BasicTextField(
-                    value = address,
-                    onValueChange = onAddressChange,
-                    singleLine = true,
+                    state = address,
+                    lineLimits = TextFieldLineLimits.SingleLine,
                     textStyle = MiuixTheme.textStyles.body2.copy(color = colors.onSurface),
                     cursorBrush = SolidColor(colors.primary),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text, imeAction = ImeAction.Go),
-                    keyboardActions = KeyboardActions(onGo = { onGo() }),
+                    onKeyboardAction = { onGo() },
                     modifier = Modifier
                         .fillMaxWidth()
                         .semantics { contentDescription = addressLabel }
@@ -250,13 +251,16 @@ private fun BrowserSubmitAction(
 @Composable
 private fun BrowserOverflowMenu(items: List<DropdownItem>) {
     var expanded by remember { mutableStateOf(false) }
+    var buttonBounds by remember { mutableStateOf(Rect.Zero) }
     val anchor = rememberCouiMenuAnchor()
     Box {
         BrowserControlButton(
             icon = Icons.Rounded.MoreVert,
             description = stringResource(R.string.action_more),
             onClick = { anchor.open { expanded = true } },
-            modifier = Modifier.couiMenuAnchor(anchor),
+            modifier = Modifier
+                .onGloballyPositioned { buttonBounds = it.boundsInWindow() }
+                .couiMenuAnchor(anchor),
         )
         when (LocalUiStyle.current) {
             AppearanceUiStyle.COUI -> {
@@ -269,7 +273,7 @@ private fun BrowserOverflowMenu(items: List<DropdownItem>) {
                         )
                     }
                 }
-                Menu(
+                CouiMenu(
                     expanded = expanded,
                     onDismissRequest = { expanded = false },
                     items = menuItems,
@@ -281,19 +285,19 @@ private fun BrowserOverflowMenu(items: List<DropdownItem>) {
                 )
             }
             AppearanceUiStyle.MIUIX -> {
-                WindowListPopup(
-                    show = expanded,
-                    alignment = PopupPositionProvider.Align.End,
-                    onDismissRequest = { expanded = false },
-                ) {
-                    ListPopupColumn {
-                        items.forEachIndexed { index, item ->
-                            DropdownImpl(
-                                item = item,
-                                optionSize = items.size,
-                                isSelected = false,
-                                index = index,
-                                onSelectedIndexChange = {
+                val overlayBackdrop = currentGlassOverlayBackdrop()
+                EtaTopLayer {
+                    GlassPopup(
+                        show = expanded,
+                        onDismissRequest = { expanded = false },
+                        anchorBounds = buttonBounds,
+                        backdrop = overlayBackdrop,
+                    ) {
+                        items.forEach { item ->
+                            GlassPopupItem(
+                                text = item.text,
+                                enabled = item.enabled,
+                                onClick = {
                                     expanded = false
                                     item.onClick?.invoke()
                                 },

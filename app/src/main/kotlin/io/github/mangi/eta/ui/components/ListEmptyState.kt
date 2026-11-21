@@ -17,13 +17,13 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import com.itos.coui.layout.CouiPageDefaults
-import com.itos.coui.shape.CouiShape
-import com.itos.coui.text.CouiTextKind
-import com.itos.coui.text.Text as CouiText
 import io.github.mangi.eta.data.model.AppearanceUiStyle
 import io.github.mangi.eta.ui.app.LocalUiStyle
 import io.github.mangi.eta.ui.components.coui.CouiIcon
+import io.github.mangi.eta.ui.components.coui.CouiPageDefaults
+import io.github.mangi.eta.ui.components.coui.CouiText
+import io.github.mangi.eta.ui.components.coui.CouiTextKind
+import io.github.suqi8.coui.kmp.squircle.SquircleShape as CouiShape
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.squircle.squircleBackground
@@ -70,14 +70,14 @@ internal fun ListEmptyState(
                 }
                 CouiText(
                     text = title,
-                    kind = if (summary != null) CouiTextKind.PreferenceTitle else CouiTextKind.Body,
+                    kind = if (summary != null) CouiTextKind.ItemTitle else CouiTextKind.Search,
                     color = if (summary != null) colors.title else colors.summary,
                     textAlign = TextAlign.Center,
                 )
                 summary?.let {
                     CouiText(
                         text = it,
-                        kind = CouiTextKind.Description,
+                        kind = CouiTextKind.GroupFooter,
                         color = colors.summary,
                         textAlign = TextAlign.Center,
                     )

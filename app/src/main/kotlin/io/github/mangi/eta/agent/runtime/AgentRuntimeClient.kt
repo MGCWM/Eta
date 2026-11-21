@@ -7,7 +7,9 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.Message
 import android.os.Messenger
+import io.github.mangi.eta.R
 import io.github.mangi.eta.core.AgentLogger
+import io.github.mangi.eta.core.AppStrings
 import io.github.mangi.eta.core.safeLogType
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -27,6 +29,12 @@ internal class AgentRuntimeClient(
         data class Completed(val result: AgentRuntimeWire.RunResult) : AttachOutcome
         data object NotActive : AttachOutcome
         data object Unavailable : AttachOutcome
+    }
+
+    sealed interface SteerOutcome {
+        data class Accepted(val supplementIndex: Int) : SteerOutcome
+        data object Rejected : SteerOutcome
+        data object Unavailable : SteerOutcome
     }
 
     sealed interface ActiveRunQuery {
@@ -67,12 +75,25 @@ internal class AgentRuntimeClient(
         )
 
         val lease = AgentRuntimeConnection.acquire(context, logger)
-            ?: return AgentRuntimeWire.RunResult("", false, "", "Agent Runtime 服务绑定失败")
+            ?: return AgentRuntimeWire.RunResult(
+                "",
+                false,
+                "",
+                AppStrings.get(R.string.runtime_err_bind_failed, "Agent Runtime 服务绑定失败"),
+            )
         val serviceMessenger = lease.messenger
         val deathRecipient = IBinder.DeathRecipient {
             if (resultRef.get() == null) {
                 resultRef.set(
-                    AgentRuntimeWire.toBundle(AgentRuntimeWire.RunResult(request.runId, false, "", "Agent Runtime 服务连接已断开", contextSnapshotRef = request.runId))
+                    AgentRuntimeWire.toBundle(
+                        AgentRuntimeWire.RunResult(
+                            request.runId,
+                            false,
+                            "",
+                            AppStrings.get(R.string.runtime_err_disconnected, "Agent Runtime 服务连接已断开"),
+                            contextSnapshotRef = request.runId,
+                        )
+                    )
                 )
                 resultLatch.countDown()
             }
@@ -88,7 +109,13 @@ internal class AgentRuntimeClient(
             AgentWireText.send(serviceMessenger, msg)
             // 最终结果或 Binder 断连负责唤醒；正常长任务不因客户端等待时长被取消。
             resultLatch.await()
-            return resultRef.get()?.let(AgentRuntimeWire::runResultFromBundle) ?: AgentRuntimeWire.RunResult("", false, "", "Agent Runtime 未返回结果")
+            return resultRef.get()?.let(AgentRuntimeWire::runResultFromBundle)
+                ?: AgentRuntimeWire.RunResult(
+                    "",
+                    false,
+                    "",
+                    AppStrings.get(R.string.runtime_err_no_result, "Agent Runtime 未返回结果"),
+                )
         } catch (interrupted: InterruptedException) {
             Thread.currentThread().interrupt()
             runCatching {
@@ -96,7 +123,13 @@ internal class AgentRuntimeClient(
                 cancelMessage.data = AgentRuntimeWire.ackBundle(request.runId)
                 serviceMessenger.send(cancelMessage)
             }
-            return AgentRuntimeWire.RunResult(request.runId, false, "", "Agent Runtime 等待被中断", contextSnapshotRef = request.runId)
+            return AgentRuntimeWire.RunResult(
+                request.runId,
+                false,
+                "",
+                AppStrings.get(R.string.runtime_err_wait_interrupted, "Agent Runtime 等待被中断"),
+                contextSnapshotRef = request.runId,
+            )
         } catch (throwable: Throwable) {
             logger.warn("Agent runtime start request failed: type=${throwable.safeLogType()}")
             return AgentRuntimeWire.RunResult(
@@ -107,7 +140,11 @@ internal class AgentRuntimeClient(
                 error = when (throwable) {
                     is AgentRuntimeWire.PayloadTooLargeException -> throwable.message
                     is AgentRuntimeImageTransfer.ImageTransferException -> throwable.message
-                    else -> "Agent Runtime 请求发送失败（${throwable.safeLogType()}）"
+                    else -> AppStrings.get(
+                        R.string.runtime_err_send_failed,
+                        "Agent Runtime 请求发送失败（%1\$s）",
+                        throwable.safeLogType(),
+                    )
                 },
             )
         } finally {
@@ -124,6 +161,51 @@ internal class AgentRuntimeClient(
             val msg = Message.obtain(null, AgentRuntimeWire.MSG_CANCEL)
             msg.data = AgentRuntimeWire.ackBundle(runId)
             serviceMessenger.send(msg)
+        }
+    }
+
+    fun steerRun(runId: String, text: String): SteerOutcome {
+        val trimmed = text.trim()
+        if (runId.isBlank() || trimmed.isBlank()) return SteerOutcome.Rejected
+        val responseLatch = CountDownLatch(1)
+        val acceptedRef = AtomicReference<Boolean?>(null)
+        val indexRef = AtomicReference(0)
+        val clientMessenger = Messenger(
+            SteerHandler { accepted, supplementIndex ->
+                acceptedRef.set(accepted)
+                indexRef.set(supplementIndex)
+                responseLatch.countDown()
+            }
+        )
+        val lease = AgentRuntimeConnection.acquire(context, logger)
+            ?: return SteerOutcome.Unavailable
+        val deathRecipient = IBinder.DeathRecipient {
+            responseLatch.countDown()
+        }
+        return try {
+            lease.binder.linkToDeath(deathRecipient, 0)
+            val msg = Message.obtain(null, AgentRuntimeWire.MSG_STEER)
+            msg.replyTo = clientMessenger
+            msg.data = AgentRuntimeWire.steerBundle(runId, trimmed, context.cacheDir)
+            AgentWireText.send(lease.messenger, msg)
+            if (!responseLatch.await(RESPONSE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                SteerOutcome.Unavailable
+            } else {
+                when (acceptedRef.get()) {
+                    true -> SteerOutcome.Accepted(indexRef.get())
+                    false -> SteerOutcome.Rejected
+                    null -> SteerOutcome.Unavailable
+                }
+            }
+        } catch (interrupted: InterruptedException) {
+            Thread.currentThread().interrupt()
+            SteerOutcome.Unavailable
+        } catch (throwable: Throwable) {
+            logger.warn("Agent runtime steer failed: type=${throwable.safeLogType()}")
+            SteerOutcome.Unavailable
+        } finally {
+            runCatching { lease.binder.unlinkToDeath(deathRecipient, 0) }
+            lease.close()
         }
     }
 
@@ -379,6 +461,20 @@ internal class AgentRuntimeClient(
                     if (delivery.beginResult()) onResult(msg.data ?: return)
                 AgentRuntimeWire.MSG_ATTACH_RUN_RESPONSE ->
                     delivery.attachResponse(AgentRuntimeWire.attachRunSucceeded(msg.data ?: return))
+            }
+        }
+    }
+
+    private class SteerHandler(
+        private val onResponse: (Boolean, Int) -> Unit,
+    ) : Handler(Looper.getMainLooper()) {
+        override fun handleMessage(msg: Message) {
+            if (msg.what == AgentRuntimeWire.MSG_STEER_RESPONSE) {
+                val data = msg.data ?: return
+                onResponse(
+                    AgentRuntimeWire.steerAcceptedFromBundle(data),
+                    AgentRuntimeWire.steerSupplementIndexFromBundle(data),
+                )
             }
         }
     }

@@ -1,5 +1,7 @@
 package io.github.mangi.eta.agent.model
 
+import io.github.mangi.eta.R
+import io.github.mangi.eta.core.AppStrings
 import io.github.mangi.eta.data.model.ReasoningEffort
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -12,14 +14,29 @@ internal object GeminiInteractionsRequest {
         "model", "input", "system_instruction", "tools", "stream", "store", "previous_interaction_id",
         "background", "agent", "agent_config", "environment", "environment_id", "webhook_config",
     )
+    private val COMPACTION_EXTRA_BLOCKED_FIELDS = setOf("messages", "instructions", "system", "tool_choice")
 
-    fun build(config: AgentModelClient.ModelConfig, messages: JSONArray, tools: JSONArray): JSONObject {
+    fun build(
+        config: AgentModelClient.ModelConfig,
+        messages: JSONArray,
+        tools: JSONArray,
+        purpose: ProviderRequestPurpose = ProviderRequestPurpose.CHAT,
+    ): JSONObject {
         val body = JSONObject()
         if (config.extraBodyJson.isNotBlank()) {
             val extra = JSONObject(config.extraBodyJson)
-            for (key in extra.keys()) if (key !in protectedFields) body.put(key, extra.get(key))
+            for (key in extra.keys()) {
+                if (key !in protectedFields && (purpose != ProviderRequestPurpose.COMPACTION || key !in COMPACTION_EXTRA_BLOCKED_FIELDS)) {
+                    body.put(key, extra.get(key))
+                }
+            }
         }
-        RequestBodyMerge.mergeCustomBody(body, config.customBody.filterNot { it.key in protectedFields })
+        RequestBodyMerge.mergeCustomBody(
+            body,
+            config.customBody.filterNot {
+                it.key in protectedFields || (purpose == ProviderRequestPurpose.COMPACTION && it.key in COMPACTION_EXTRA_BLOCKED_FIELDS)
+            },
+        )
         body.put("model", config.model.removePrefix("models/"))
             .put("input", GeminiInteractionHistory.input(messages))
             .put("stream", true)
@@ -47,13 +64,24 @@ internal object GeminiInteractionsRequest {
         generation.remove("tool_choice")
         generation.remove("thinking_level")
         generation.remove("thinking_summaries")
-        if (searchEnabled && tools.length() > 0) generation.put("tool_choice", "validated")
+        if (purpose == ProviderRequestPurpose.COMPACTION && converted.length() > 0) {
+            generation.put("tool_choice", "none")
+        } else if (searchEnabled && tools.length() > 0) {
+            generation.put("tool_choice", "validated")
+        }
         val effort = config.effectiveReasoningEffort
         if (effort != ReasoningEffort.DEFAULT) {
-            require(effort != ReasoningEffort.OFF) { "当前 Gemini 模型不支持关闭思考，请选择 Default 或支持的思考档位。" }
-            require(effort.wireValue in setOf("minimal", "low", "medium", "high") &&
-                effort in config.reasoningCapabilities?.supportedEfforts.orEmpty()) {
-                "当前 Gemini 模型不支持所选思考档位。"
+            require(effort != ReasoningEffort.OFF) {
+                AppStrings.get(
+                    R.string.provider_err_gemini_thinking_off_unsupported,
+                    "当前 Gemini 模型不支持关闭思考，请选择 Default 或支持的思考档位。",
+                )
+            }
+            require(effort.wireValue in setOf("minimal", "low", "medium", "high", "xhigh")) {
+                AppStrings.get(
+                    R.string.provider_err_gemini_interactions_effort_unsupported,
+                    "Gemini Interactions 协议不支持所选思考档位。",
+                )
             }
             generation.put("thinking_level", effort.wireValue)
         }
@@ -155,19 +183,21 @@ internal object GeminiInteractionHistory {
                     if (url.startsWith("data:image/", ignoreCase = true)) {
                         val comma = url.indexOf(',')
                         require(comma > 0 && url.substring(0, comma).endsWith(";base64", ignoreCase = true)) {
-                            "Gemini 图片输入必须为 Base64 图片或 HTTP 地址。"
+                            AppStrings.get(R.string.provider_err_gemini_image_http_source, "Gemini 图片输入必须为 Base64 图片或 HTTP 地址。")
                         }
                         image.put("mime_type", url.substring(5, comma).substringBefore(';'))
                             .put("data", url.substring(comma + 1))
                     } else {
                         require(url.startsWith("https://") || url.startsWith("http://")) {
-                            "Gemini 图片输入地址无效。"
+                            AppStrings.get(R.string.provider_err_gemini_image_url_invalid, "Gemini 图片输入地址无效。")
                         }
                         image.put("uri", url)
                     }
                     converted.put(image)
                 }
-                else -> throw IllegalArgumentException("Gemini 不支持该输入内容类型。")
+                else -> throw IllegalArgumentException(
+                    AppStrings.get(R.string.provider_err_gemini_input_type_unsupported, "Gemini 不支持该输入内容类型。"),
+                )
             }
         }
         return converted

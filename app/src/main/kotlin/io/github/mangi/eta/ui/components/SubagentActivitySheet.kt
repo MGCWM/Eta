@@ -40,23 +40,18 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.itos.coui.dialog.CouiDialogAction
-import com.itos.coui.dialog.CouiDialogDefaults
-import com.itos.coui.dialog.CouiDialogPlacement
-import com.itos.coui.dialog.Dialog
-import com.itos.coui.menu.rememberCouiWindowBackdrop
-import com.itos.coui.theme.CouiTheme
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.subagent.SubagentActivitySnapshot
 import io.github.mangi.eta.agent.subagent.SubagentStepSnapshot
 import io.github.mangi.eta.data.model.AppearanceUiStyle
 import io.github.mangi.eta.ui.app.LocalUiStyle
-import io.github.mangi.eta.ui.components.coui.rememberCouiDialogMaterial
+import io.github.mangi.eta.ui.components.coui.CouiBottomSheet
+import io.github.mangi.eta.ui.components.coui.CouiPanelDefaults
 import io.github.mangi.eta.ui.model.ToolActivityMessageUi
 import io.github.mangi.eta.ui.model.ToolActivityStatusUi
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.overlay.OverlayBottomSheet
+import top.yukonga.miuix.kmp.glass.GlassBottomSheet
 import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -72,19 +67,38 @@ internal fun SubagentActivityRow(
 ) {
     var showInspector by rememberSaveable(message.id) { mutableStateOf(false) }
     val running = message.status == ToolActivityStatusUi.Running
-    val failed = message.status == ToolActivityStatusUi.Failed ||
-        snapshot.status == SubagentActivitySnapshot.STATUS_FAILED
+    val cancelled = !running && (
+        snapshot.status == SubagentActivitySnapshot.STATUS_CANCELLED ||
+            (
+                message.status == ToolActivityStatusUi.Unknown &&
+                    snapshot.status != SubagentActivitySnapshot.STATUS_COMPLETED &&
+                    snapshot.status != SubagentActivitySnapshot.STATUS_FAILED
+                )
+        )
+    val failed = !running && !cancelled && (
+        message.status == ToolActivityStatusUi.Failed ||
+            snapshot.status == SubagentActivitySnapshot.STATUS_FAILED
+        )
     val typeLabel = snapshot.subagentType.ifBlank { "subagent" }
     val taskTitle = snapshot.description.ifBlank { message.argumentsSummary.ifBlank { "Subagent" } }
     val subtitle = when {
         running -> snapshot.currentAction.takeIf { it.isNotBlank() }
-            ?: if (snapshot.toolStepCount > 0) "已执行 ${snapshot.toolStepCount} 步" else "正在运行…"
+            ?: if (snapshot.toolStepCount > 0) {
+                stringResource(R.string.subagent_steps_executed, snapshot.toolStepCount)
+            } else {
+                stringResource(R.string.subagent_status_running)
+            }
+        cancelled -> if (snapshot.toolStepCount > 0) {
+            stringResource(R.string.subagent_stopped_with_tools, snapshot.toolStepCount)
+        } else {
+            stringResource(R.string.subagent_status_stopped)
+        }
         failed -> snapshot.error?.lineSequence()?.firstOrNull()?.takeIf { it.isNotBlank() }
             ?: message.outcomeLine()
-            ?: "执行未完成"
+            ?: stringResource(R.string.subagent_status_incomplete)
         else -> when {
-            snapshot.toolStepCount > 0 -> "完成 · ${snapshot.toolStepCount} 次工具调用"
-            else -> message.outcomeLine() ?: "完成"
+            snapshot.toolStepCount > 0 -> stringResource(R.string.subagent_completed_with_tools, snapshot.toolStepCount)
+            else -> message.outcomeLine() ?: stringResource(R.string.subagent_status_completed)
         }
     }
 
@@ -139,7 +153,7 @@ internal fun SubagentActivityRow(
             }
             Icon(
                 imageVector = Icons.Rounded.ChevronRight,
-                contentDescription = "查看 Subagent 详情",
+                contentDescription = stringResource(R.string.subagent_view_details),
                 modifier = Modifier
                     .padding(start = 6.dp, end = 8.dp)
                     .size(14.dp),
@@ -150,36 +164,32 @@ internal fun SubagentActivityRow(
 
     when (LocalUiStyle.current) {
         AppearanceUiStyle.COUI -> {
-            val dark = CouiTheme.isDark
-            Dialog(
-                visible = showInspector,
+            CouiBottomSheet(
+                show = showInspector,
                 onDismissRequest = { showInspector = false },
-                dark = dark,
                 title = taskTitle,
-                confirmAction = CouiDialogAction(
-                    text = stringResource(R.string.action_close),
-                    onClick = { showInspector = false },
-                ),
-                placement = CouiDialogPlacement.Bottom,
-                material = rememberCouiDialogMaterial(dark),
-                backdrop = rememberCouiWindowBackdrop(),
             ) {
                 SubagentInspectorContent(
+                    messageId = message.id,
                     snapshot = snapshot,
                     running = running,
+                    cancelled = cancelled,
                     failed = failed,
                 )
             }
         }
         AppearanceUiStyle.MIUIX -> {
-            OverlayBottomSheet(
+            GlassBottomSheet(
                 show = showInspector,
+                backdrop = currentGlassOverlayBackdrop(),
                 title = taskTitle,
                 onDismissRequest = { showInspector = false },
             ) {
                 SubagentInspectorContent(
+                    messageId = message.id,
                     snapshot = snapshot,
                     running = running,
+                    cancelled = cancelled,
                     failed = failed,
                 )
             }
@@ -223,13 +233,16 @@ private fun SubagentTypeBadge(
 
 @Composable
 private fun SubagentInspectorContent(
+    messageId: String,
     snapshot: SubagentActivitySnapshot,
     running: Boolean,
+    cancelled: Boolean,
     failed: Boolean,
 ) {
     val density = LocalDensity.current
     val maxSheetHeight = with(density) { LocalWindowInfo.current.containerSize.height.toDp() } * 0.76f
-    var promptExpanded by rememberSaveable(snapshot.subagentId) { mutableStateOf(false) }
+    // 使用稳定 messageId 作 key，避免启动瞬间 subagentId 从空变为 sub_1 时重置展开状态。
+    var promptExpanded by rememberSaveable(messageId) { mutableStateOf(false) }
     val pulse = rememberDrawPhasePulse(active = running)
     val isCoui = LocalUiStyle.current == AppearanceUiStyle.COUI
 
@@ -238,7 +251,11 @@ private fun SubagentInspectorContent(
             .fillMaxWidth()
             .then(
                 if (isCoui) {
-                    Modifier.padding(horizontal = CouiDialogDefaults.contentPadding, vertical = 8.dp)
+                    Modifier
+                        .heightIn(max = maxSheetHeight)
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = CouiPanelDefaults.contentPadding)
+                        .padding(top = 8.dp, bottom = 24.dp)
                 } else {
                     Modifier
                         .heightIn(max = maxSheetHeight)
@@ -264,6 +281,7 @@ private fun SubagentInspectorContent(
                         when {
                             running -> MiuixTheme.colorScheme.primary
                             failed -> StatusError
+                            cancelled -> MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.55f)
                             else -> StatusSuccess
                         },
                     ),
@@ -306,8 +324,10 @@ private fun SubagentInspectorContent(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        text = if (snapshot.resumed) "Prompt (Resumed)" else "Prompt",
-                        style = MiuixTheme.textStyles.footnote2.copy(fontFamily = FontFamily.Monospace),
+                        text = stringResource(
+                            if (snapshot.resumed) R.string.subagent_prompt_resumed_label else R.string.subagent_prompt_label,
+                        ),
+                        style = MiuixTheme.textStyles.footnote2,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.7f),
                         modifier = Modifier.weight(1f),
                     )
@@ -327,8 +347,16 @@ private fun SubagentInspectorContent(
         }
 
         // 内部执行时间线：沿用主聊天界面的 1dp 细线与圆点徽章
-        if (snapshot.steps.isNotEmpty() || running) {
+        if (snapshot.steps.isNotEmpty() || snapshot.omittedSteps > 0 || running) {
             Column(modifier = Modifier.fillMaxWidth()) {
+                if (snapshot.omittedSteps > 0) {
+                    Text(
+                        text = stringResource(R.string.subagent_omitted_steps, snapshot.omittedSteps),
+                        style = MiuixTheme.textStyles.footnote2,
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.65f),
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
+                }
                 snapshot.steps.forEachIndexed { index, step ->
                     key(step.id) {
                         val isLastStep = index == snapshot.steps.lastIndex && !running
@@ -365,7 +393,7 @@ private fun SubagentInspectorContent(
                             contentAlignment = Alignment.CenterStart,
                         ) {
                             ShimmerText(
-                                text = snapshot.currentAction.ifBlank { "正在运行…" },
+                                text = snapshot.currentAction.ifBlank { stringResource(R.string.subagent_status_running) },
                                 active = true,
                                 style = MiuixTheme.textStyles.body2,
                                 color = MiuixTheme.colorScheme.onSurface,
@@ -376,9 +404,10 @@ private fun SubagentInspectorContent(
             }
         }
 
-        // 错误信息
-        val error = snapshot.error?.takeIf { it.isNotBlank() && failed }
-        if (error != null) {
+        // 失败或停止提示
+        if (failed) {
+            val error = snapshot.error?.takeIf { it.isNotBlank() }
+                ?: stringResource(R.string.subagent_status_incomplete)
             Text(
                 text = error,
                 style = MiuixTheme.textStyles.footnote1,
@@ -391,14 +420,30 @@ private fun SubagentInspectorContent(
                     )
                     .padding(horizontal = 14.dp, vertical = 10.dp),
             )
+        } else if (cancelled) {
+            Text(
+                text = snapshot.error?.takeIf { it.isNotBlank() }
+                    ?: stringResource(R.string.subagent_status_stopped),
+                style = MiuixTheme.textStyles.footnote1,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .squircleSurface(
+                        color = MiuixTheme.colorScheme.surfaceContainer,
+                        cornerRadius = 12.dp,
+                    )
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+            )
         }
 
         // 实时或最终汇报（Output）
         if (snapshot.output.isNotBlank()) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    text = if (running) "Streaming" else "Summary",
-                    style = MiuixTheme.textStyles.footnote2.copy(fontFamily = FontFamily.Monospace),
+                    text = stringResource(
+                        if (running) R.string.subagent_output_streaming_label else R.string.subagent_output_summary_label,
+                    ),
+                    style = MiuixTheme.textStyles.footnote2,
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.7f),
                 )
                 SelectionContainer {
@@ -415,6 +460,31 @@ private fun SubagentInspectorContent(
                             .padding(horizontal = 14.dp, vertical = 12.dp),
                     )
                 }
+            }
+        }
+
+        // 轻量用量摘要：单行克制展示，不打断主时间线阅读
+        snapshot.usage?.let { usage ->
+            val usageParts = buildList {
+                if (usage.inputTokens > 0) {
+                    add(stringResource(R.string.subagent_usage_input, formatExactTokenCount(usage.inputTokens)))
+                }
+                if (usage.cachedTokens > 0) {
+                    add(stringResource(R.string.subagent_usage_cached, formatExactTokenCount(usage.cachedTokens)))
+                }
+                if (usage.outputTokens > 0) {
+                    add(stringResource(R.string.subagent_usage_output, formatExactTokenCount(usage.outputTokens)))
+                }
+                if (usage.llmMs > 0L) {
+                    add(formatStatDuration(usage.llmMs))
+                }
+            }
+            if (usageParts.isNotEmpty()) {
+                Text(
+                    text = usageParts.joinToString(" · "),
+                    style = MiuixTheme.textStyles.footnote2.copy(fontFamily = FontFamily.Monospace),
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.65f),
+                )
             }
         }
     }
@@ -442,7 +512,7 @@ private fun SubagentStepRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ShimmerText(
-                text = step.title.ifBlank { step.toolName.ifBlank { "步骤" } },
+                text = step.title.ifBlank { step.toolName.ifBlank { stringResource(R.string.subagent_step_fallback) } },
                 active = running,
                 style = MiuixTheme.textStyles.body2,
                 color = when {
@@ -460,7 +530,11 @@ private fun SubagentStepRow(
                 )
             }
         }
-        AnimatedVisibility(visible = expanded && hasDetail) {
+        AnimatedVisibility(
+            visible = expanded && hasDetail,
+            enter = ExpandDownEnter,
+            exit = CollapseUpExit,
+        ) {
             SelectionContainer {
                 Text(
                     text = step.detail,

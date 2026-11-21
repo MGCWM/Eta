@@ -1,16 +1,20 @@
 package io.github.mangi.eta.agent.model
 
+import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.runtime.AgentEvent
 import io.github.mangi.eta.agent.runtime.AgentRunController
 import io.github.mangi.eta.agent.memory.AgentMemoryContext
 import io.github.mangi.eta.agent.skill.SkillContext
 import io.github.mangi.eta.agent.roleplay.RoleplayRunContext
 import io.github.mangi.eta.config.Prefs
+import io.github.mangi.eta.core.AppStrings
 import io.github.mangi.eta.agent.tool.AgentToolCapabilities
 import io.github.mangi.eta.agent.tool.AgentToolRequirements
 import io.github.mangi.eta.data.model.AnthropicProviderSetting
 import io.github.mangi.eta.data.model.CustomBody
 import io.github.mangi.eta.data.model.CustomHeader
+import io.github.mangi.eta.data.model.GeminiEndpointMode
+import io.github.mangi.eta.data.model.GeminiProviderSetting
 import io.github.mangi.eta.data.model.OpenAiEndpointMode
 import io.github.mangi.eta.data.model.ModelReasoningCapabilities
 import io.github.mangi.eta.data.model.ProviderAuthModes
@@ -110,6 +114,7 @@ internal object AgentModelClient {
         roleplayContext: RoleplayRunContext? = null,
         rewriteReply: Boolean = false,
         assistantScreenContext: String = "",
+        extraSystemContext: String = "",
         toolFilter: ((JSONArray) -> JSONArray)? = null,
         onContextSnapshot: (AgentContextSnapshot) -> Unit = {},
         onTranscript: (List<ConversationMessage>) -> Unit = {},
@@ -127,6 +132,7 @@ internal object AgentModelClient {
             rootAvailable = initialCapabilities.rootAvailable,
             roleplayContext = roleplayContext,
             executionContext = executionContext,
+            extraSystemContext = extraSystemContext,
         )
         if (rewriteReply) {
             messages.put(messages.length() - 1, AgentConversationCodec.userTextMessage(
@@ -145,7 +151,13 @@ internal object AgentModelClient {
         val transcript = JSONArray()
         // 旧 history 中的无效消息可能在组装时被跳过，系统边界不能由 history 条数倒推。
         val systemCount = AgentPromptBuilder.buildSystemMessages(
-            config, skillContext, memoryContext, initialCapabilities.rootAvailable, roleplayContext, executionContext,
+            config,
+            skillContext,
+            memoryContext,
+            initialCapabilities.rootAvailable,
+            roleplayContext,
+            executionContext,
+            extraSystemContext,
         ).length()
         fun toolsFor(capabilities: AgentToolCapabilities): JSONArray {
             if (rewriteReply) return JSONArray()
@@ -185,7 +197,13 @@ internal object AgentModelClient {
             val capabilities = capabilitiesProvider()
             if (capabilities.rootAvailable != promptRootAvailable) {
                 val systemMessages = AgentPromptBuilder.buildSystemMessages(
-                    config, skillContext, memoryContext, capabilities.rootAvailable, roleplayContext, executionContext,
+                    config,
+                    skillContext,
+                    memoryContext,
+                    capabilities.rootAvailable,
+                    roleplayContext,
+                    executionContext,
+                    extraSystemContext,
                 )
                 for (index in 0 until systemMessages.length()) {
                     messages.put(index, systemMessages.getJSONObject(index))
@@ -268,24 +286,53 @@ internal object AgentModelClient {
         (0 until tools.length()).mapNotNullTo(mutableSetOf()) { toolName(tools.getJSONObject(it)) }
 
     private fun ModelConfig.validate() {
-        require(baseUrl.isNotBlank()) { "请先配置 API 地址" }
-        when {
-            authMode == ProviderAuthModes.API_KEY -> require(apiKey.isNotBlank()) { "请先配置 API Key" }
-            ProviderAuthModes.isOAuth(authMode) -> {
-                require(providerId.isNotBlank()) { "账号登录缺少服务商标识，请重新选择服务商" }
-                require(apiKey.isEmpty()) { "账号登录配置不能包含 API Key" }
-            }
-            else -> error("不支持的服务商认证方式")
+        require(baseUrl.isNotBlank()) {
+            AppStrings.get(R.string.model_err_base_url_required, "请先配置 API 地址")
         }
-        require(model.isNotBlank()) { "请先配置模型名" }
+        when {
+            authMode == ProviderAuthModes.API_KEY -> require(apiKey.isNotBlank()) {
+                AppStrings.get(R.string.model_err_api_key_required, "请先配置 API Key")
+            }
+            ProviderAuthModes.isOAuth(authMode) -> {
+                require(providerId.isNotBlank()) {
+                    AppStrings.get(
+                        R.string.model_err_oauth_provider_required,
+                        "账号登录缺少服务商标识，请重新选择服务商",
+                    )
+                }
+                require(apiKey.isEmpty()) {
+                    AppStrings.get(
+                        R.string.model_err_oauth_api_key_forbidden,
+                        "账号登录配置不能包含 API Key",
+                    )
+                }
+            }
+            else -> error(
+                AppStrings.get(R.string.model_err_auth_mode_unsupported, "不支持的服务商认证方式")
+            )
+        }
+        require(model.isNotBlank()) {
+            AppStrings.get(R.string.model_err_model_required, "请先配置模型名")
+        }
         require(
             reasoningCapabilities?.mandatory != true ||
                 effectiveReasoningEffort != ReasoningEffort.OFF
-        ) { "当前模型强制启用思考，不能选择 Off 或禁用思考权限" }
+        ) {
+            AppStrings.get(
+                R.string.model_err_mandatory_thinking,
+                "当前模型强制启用思考，不能选择 Off 或禁用思考权限",
+            )
+        }
         if (extraBodyJson.isNotBlank()) {
             runCatching { JSONObject(extraBodyJson) }
                 .getOrElse { throwable ->
-                    error("额外请求体 JSON 无效：${throwable.message ?: throwable.javaClass.simpleName}")
+                    error(
+                        AppStrings.get(
+                            R.string.model_err_extra_body_invalid,
+                            "额外请求体 JSON 无效：%1\$s",
+                            throwable.message ?: throwable.javaClass.simpleName,
+                        )
+                    )
                 }
         }
     }
@@ -319,6 +366,9 @@ internal object AgentModelClient {
         val systemPrompt: String,
         val anthropicVersion: String = AnthropicProviderSetting.DEFAULT_ANTHROPIC_VERSION,
         val openAiEndpointMode: String = OpenAiEndpointMode.CHAT_COMPLETIONS,
+        val geminiEndpointMode: String = GeminiEndpointMode.AI_STUDIO,
+        val vertexProject: String = "",
+        val vertexLocation: String = GeminiProviderSetting.DEFAULT_VERTEX_LOCATION,
         val hostedWebSearchEnabled: Boolean = false,
         val supportsSearchSuggestions: Boolean = false,
         val terminalTools: Boolean = false,
@@ -339,7 +389,8 @@ internal object AgentModelClient {
         val usesHostedWebSearch: Boolean
             get() = hostedWebSearchEnabled && when (providerType) {
                 ProviderTypes.OPENAI_COMPATIBLE -> openAiEndpointMode == OpenAiEndpointMode.RESPONSES
-                ProviderTypes.GEMINI -> supportsSearchSuggestions && GeminiModelCapabilities.supportsHostedSearch(model)
+                ProviderTypes.GEMINI -> GeminiEndpointMode.normalize(geminiEndpointMode) == GeminiEndpointMode.AI_STUDIO &&
+                    supportsSearchSuggestions && GeminiModelCapabilities.supportsHostedSearch(model)
                 else -> false
             }
 
@@ -366,6 +417,7 @@ internal object AgentModelClient {
         val compactedUserTurns: Int = 0,
         val summaryThroughUserTurn: Int = 0,
         val messageId: String = "",
+        val compactionArchiveId: String = "",
     )
 
     fun interface ToolExecutor {

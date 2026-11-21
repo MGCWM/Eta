@@ -4,7 +4,7 @@
 
 Eta 的免 Root Linux 后端以独立进程运行 [PRoot](https://github.com/termux/proot)，并静态链接 [talloc](https://talloc.samba.org/) 与 [libandroid-shmem](https://github.com/termux/libandroid-shmem)。PRoot 源码采用 GPL-2.0-or-later；talloc 采用 LGPL-3.0-or-later；libandroid-shmem 采用 BSD-3-Clause。附带的组合 PRoot 可执行程序按 GPL-3.0-or-later 分发，各组件版权与许可证保留。
 
-APK 的 `assets/native-sources` 附带校验过的原始源码，以及从实际构建入口自动生成的脚本、PTY 源码和补丁包；`assets/licenses` 附带许可证全文。构建脚本与说明位于 [终端原生组件](TERMINAL_NATIVE.md)。这些独立第三方程序保持其开源许可权利，不受 Eta 主项目非商业许可证的附加限制。
+APK 的 `assets/native-sources` 附带校验过的原始源码，以及从实际构建入口自动生成的脚本、PTY 源码和补丁包；`assets/licenses` 附带许可证全文。构建脚本与说明位于 [终端原生组件](TERMINAL_NATIVE.md)。这些独立第三方程序继续适用各自许可证。
 
 ## models.dev 模型目录
 
@@ -20,15 +20,15 @@ Android 标准库兼容使用 [desugar_jdk_libs](https://github.com/google/desug
 
 Eta 使用 [Nimbus JOSE + JWT](https://connect2id.com/products/nimbus-jose-jwt) 校验 OAuth 登录的签名和身份声明。该库由 Connect2id Ltd. 维护，采用 Apache License 2.0；许可全文随 APK 保存在 [`assets/licenses/nimbus-jose-jwt-Apache-2.0.txt`](../app/src/main/assets/licenses/nimbus-jose-jwt-Apache-2.0.txt)。依赖版本以 `gradle/libs.versions.toml` 为准。
 
-## COUI-Kit 与 Miuix
+## COUI 与 Miuix
 
-Eta 的应用界面支持 [COUI-Kit](https://github.com/itoseo/COUI-Kit)（`io.github.itoseo:coui`，采用 [Mozilla Public License 2.0](https://www.mozilla.org/MPL/2.0/)）与 [Miuix](https://github.com/compose-miuix-ui/miuix)（采用 [Apache License 2.0](https://github.com/compose-miuix-ui/miuix/blob/main/LICENSE)）。依赖版本以 `gradle/libs.versions.toml` 为准。
+Eta 的应用界面使用 [COUI](https://github.com/suqi8/coui)（Maven group 为 `io.github.suqi8.coui.kmp`，许可全文随 APK 保存在 [`assets/licenses/coui-Apache-2.0.txt`](../app/src/main/assets/licenses/coui-Apache-2.0.txt)）与 [Miuix](https://github.com/compose-miuix-ui/miuix)（采用 [Apache License 2.0](https://github.com/compose-miuix-ui/miuix/blob/main/LICENSE)）。依赖版本以 `gradle/libs.versions.toml` 为准。
 
 ## DexKit
 
 Eta 使用 [DexKit](https://github.com/LuckyPray/DexKit) 解析系统应用的 DEX 特征，定位经过混淆的 Hook 目标。依赖版本以 `gradle/libs.versions.toml` 为准，官方发布记录见 [Releases](https://github.com/LuckyPray/DexKit/releases)。
 
-DexKit 的 JVM 接口等非 `Core/` 代码采用 [Apache License 2.0](https://github.com/LuckyPray/DexKit/blob/2.2.0/LICENSE)，`Core/` 原生解析代码采用 [GNU LGPL v3](https://github.com/LuckyPray/DexKit/blob/2.2.0/Core/LICENSE)。Eta 通过官方 AAR 使用其独立原生动态库；上游源码、构建配置与版权声明可在 [官方源码](https://github.com/LuckyPray/DexKit/tree/2.2.0) 获取。这些第三方组件保留原有许可证权利，不受 Eta 主项目非商业许可证的附加限制。
+DexKit 的 JVM 接口等非 `Core/` 代码采用 [Apache License 2.0](https://github.com/LuckyPray/DexKit/blob/2.2.0/LICENSE)，`Core/` 原生解析代码采用 [GNU LGPL v3](https://github.com/LuckyPray/DexKit/blob/2.2.0/Core/LICENSE)。Eta 通过官方 AAR 使用其独立原生动态库；上游源码、构建配置与版权声明可在 [官方源码](https://github.com/LuckyPray/DexKit/tree/2.2.0) 获取。这些第三方组件继续适用各自许可证。
 
 ## JetBrains Mono
 
@@ -105,38 +105,6 @@ Lobe Icons 使用 MIT License：
 MIT License
 
 Copyright (c) 2023 LobeHub
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
-## Kimi Code 图标
-
-首页“启动 Kimi Web”入口的 `ic_kimi_code.xml` 转换自 Moonshot AI
-[Kimi Code](https://github.com/MoonshotAI/kimi-code/blob/d1ca65e1de189617e9edbc54010e62d472a1de3d/apps/vscode/resources/kimi-icon.svg)
-的单色侧栏图标。转换仅适配 Android VectorDrawable 格式，保留原始几何与比例。
-
-Kimi Code 使用 MIT License：
-
-```text
-MIT License
-
-Copyright (c) 2026 Moonshot AI
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

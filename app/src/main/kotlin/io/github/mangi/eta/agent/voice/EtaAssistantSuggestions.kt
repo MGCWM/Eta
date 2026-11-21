@@ -8,10 +8,9 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -21,29 +20,33 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.mangi.eta.R
+import io.github.mangi.eta.ui.components.coui.couiPressMotion
+import io.github.mangi.eta.ui.components.coui.rememberCouiPressMotion
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Text
 
-private val assistantSuggestions = listOf(
-    "总结屏幕内容",
-    "解释当前页面",
-    "提取关键信息",
+private val assistantSuggestionResIds = listOf(
+    R.string.voice_i18n_suggestion_summarize_screen,
+    R.string.voice_i18n_suggestion_explain_page,
+    R.string.voice_i18n_suggestion_extract_key_info,
 )
 
-private val suggestionEnterEasing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
+private val suggestionEnterEasing = CubicBezierEasing(0.20f, 0f, 0f, 1f)
 
 @Composable
 internal fun EtaAssistantSuggestions(
@@ -58,61 +61,84 @@ internal fun EtaAssistantSuggestions(
         enter = EnterTransition.None,
         exit = shrinkVertically(
             shrinkTowards = Alignment.Bottom,
-            animationSpec = tween(150, easing = FastOutSlowInEasing),
-        ) + fadeOut(tween(110)),
+            animationSpec = tween(160, easing = FastOutSlowInEasing),
+        ) + fadeOut(tween(120)),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
-                .padding(bottom = 10.dp),
+                // 阴影与按压回弹留在横向滚动裁剪框内部，避免上下边缘被水平视口截平。
+                .padding(top = 6.dp, bottom = 10.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Spacer(modifier = Modifier.width(10.dp))
-            assistantSuggestions.forEachIndexed { index, suggestion ->
-                val progress = remember(suggestion) { Animatable(0f) }
-                val opacity = remember(suggestion) { Animatable(0f) }
+            assistantSuggestionResIds.forEachIndexed { index, resId ->
+                val suggestion = stringResource(resId)
+                val progress = remember(resId) { Animatable(0f) }
+                val opacity = remember(resId) { Animatable(0f) }
+                val interactionSource = remember(resId) { MutableInteractionSource() }
+                val press = rememberCouiPressMotion()
                 LaunchedEffect(visible) {
                     if (visible) {
                         progress.snapTo(0f)
                         opacity.snapTo(0f)
-                        if (index > 0) delay(index * 40L)
+                        if (index > 0) delay(index * 42L)
                         coroutineScope {
                             launch {
                                 progress.animateTo(
                                     targetValue = 1f,
-                                    animationSpec = tween(220, easing = suggestionEnterEasing),
+                                    animationSpec = tween(250, easing = suggestionEnterEasing),
                                 )
                             }
-                            launch { opacity.animateTo(1f, tween(180, easing = FastOutSlowInEasing)) }
+                            launch {
+                                opacity.animateTo(1f, tween(180, easing = FastOutSlowInEasing))
+                            }
                         }
                     } else {
                         coroutineScope {
-                            launch { progress.animateTo(0f, tween(110)) }
+                            launch { progress.animateTo(0f, tween(120)) }
                             launch { opacity.animateTo(0f, tween(110)) }
                         }
                     }
                 }
                 Box(
                     modifier = Modifier
-                        .height(34.dp)
+                        .height(36.dp)
                         .graphicsLayer {
+                            val p = progress.value
                             alpha = opacity.value
-                            translationY = (1f - progress.value) * 6.dp.toPx()
+                            translationY = (1f - p) * 10.dp.toPx()
+                            val entryScale = 0.93f + 0.07f * p
+                            scaleX = entryScale
+                            scaleY = entryScale
                         }
-                        .clip(CircleShape)
-                        .background(colors.chipBackground)
-                        .border(0.75.dp, colors.chipStroke, CircleShape)
-                        .clickable(enabled = visible) { onSuggestionClick(suggestion) }
-                        .padding(horizontal = 13.dp),
+                        .couiPressMotion(press, enabled = visible, cancelOnConsumedMove = true)
+                        .couiAssistantCapsule(
+                            surfaceColor = colors.chipBackground,
+                            strokeColor = colors.chipStroke,
+                            dark = colors.dark,
+                            elevation = AssistantCapsuleElevation.Chip,
+                            interactive = visible,
+                            interactionSource = interactionSource,
+                            pressMotion = press,
+                        )
+                        .clickable(
+                            interactionSource = interactionSource,
+                            indication = null,
+                            enabled = visible,
+                            role = Role.Button,
+                        ) { onSuggestionClick(suggestion) }
+                        .padding(horizontal = 15.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         text = suggestion,
-                        color = colors.inputSecondary,
-                        fontSize = 13.sp,
+                        color = colors.inputPrimary.copy(alpha = 0.88f),
+                        fontSize = 13.5.sp,
                         lineHeight = 18.sp,
+                        fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )

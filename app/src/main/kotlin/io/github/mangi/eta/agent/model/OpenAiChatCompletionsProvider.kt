@@ -1,7 +1,9 @@
 package io.github.mangi.eta.agent.model
 
+import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.runtime.AgentRunController
 import io.github.mangi.eta.agent.runtime.AgentTokenUsage
+import io.github.mangi.eta.core.AppStrings
 import io.github.mangi.eta.data.model.OpenAiEndpointMode
 import io.github.mangi.eta.data.model.ProviderSourceTypes
 import io.github.mangi.eta.data.provider.ProviderSourceRegistry
@@ -15,6 +17,10 @@ import org.json.JSONObject
 internal object OpenAiChatCompletionsProvider : AgentProviderClient {
     private const val MAX_ERROR_CHARS = 600
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+    private val COMPACTION_FORBIDDEN_FIELDS = setOf(
+        "model", "stream", "messages", "input", "instructions", "system",
+        "system_instruction", "tools", "tool_choice", "stream_options",
+    )
 
     override val id: String = "openai_chat_completions"
 
@@ -36,7 +42,7 @@ internal object OpenAiChatCompletionsProvider : AgentProviderClient {
     ): ProviderResponse {
         val config = request.effectiveConfig
         require(config.openAiEndpointMode == OpenAiEndpointMode.CHAT_COMPLETIONS) {
-            "当前 Provider 未配置为 Chat Completions API"
+            AppStrings.get(R.string.provider_err_not_chat_completions_api, "当前 Provider 未配置为 Chat Completions API")
         }
         val url = ProviderUrls.openAiChatCompletionsUrl(config.baseUrl)
         val headers = okhttp3.Headers.Builder()
@@ -54,8 +60,15 @@ internal object OpenAiChatCompletionsProvider : AgentProviderClient {
             }
             .build()
 
-        val requestJson = buildRequestJson(config, request.messages, request.effectiveTools).apply {
-            if (!request.purpose.allowsTools) {
+        val requestJson = buildRequestJson(config, request.messages, request.effectiveTools, request.purpose).apply {
+            if (request.purpose == ProviderRequestPurpose.COMPACTION) {
+                if (optJSONArray("tools")?.length()?.let { it > 0 } == true) {
+                    put("tool_choice", "none")
+                } else {
+                    remove("tools")
+                    remove("tool_choice")
+                }
+            } else if (!request.purpose.allowsTools) {
                 remove("tools")
                 remove("tool_choice")
             }
@@ -94,7 +107,8 @@ internal object OpenAiChatCompletionsProvider : AgentProviderClient {
     internal fun buildRequestJson(
         config: AgentModelClient.ModelConfig,
         messages: JSONArray,
-        tools: JSONArray
+        tools: JSONArray,
+        purpose: ProviderRequestPurpose = ProviderRequestPurpose.CHAT,
     ): JSONObject {
         val sourceType = ProviderSourceRegistry.resolve(
             providerId = config.providerId,
@@ -102,6 +116,27 @@ internal object OpenAiChatCompletionsProvider : AgentProviderClient {
             baseUrl = config.baseUrl,
             providerType = config.providerType,
         )
+        if (purpose == ProviderRequestPurpose.COMPACTION) {
+            return JSONObject().also { request ->
+                mergeExtraBody(request, config.extraBodyJson)
+                RequestBodyMerge.mergeCustomBody(request, config.customBody)
+                COMPACTION_FORBIDDEN_FIELDS.forEach(request::remove)
+                request.put("model", config.model)
+                request.put("stream", true)
+                request.put("messages", OpenAiRequestMessages.forChatCompletions(messages))
+                if (tools.length() > 0) {
+                    request.put("tools", tools)
+                    request.put("tool_choice", "none")
+                } else {
+                    request.remove("tools")
+                    request.remove("tool_choice")
+                }
+                if (sourceType != ProviderSourceTypes.OPENROUTER) {
+                    request.put("stream_options", JSONObject().put("include_usage", true))
+                }
+                ProviderReasoning.applyOpenAiCompatibleRequest(request, config)
+            }
+        }
         return JSONObject()
             .put("model", config.model)
             .put("stream", true)
@@ -124,7 +159,7 @@ internal object OpenAiChatCompletionsProvider : AgentProviderClient {
         existingToolCallIds: Set<String>,
         onEvent: (ProviderEvent) -> Unit
     ): JSONObject {
-        if (stream == null) error("模型接口未返回响应流")
+        if (stream == null) error(AppStrings.get(R.string.provider_err_no_response_stream, "模型接口未返回响应流"))
         val content = StringBuilder()
         val reasoningContent = StringBuilder()
         val toolCalls = linkedMapOf<Int, StreamingToolCall>()
@@ -185,7 +220,7 @@ internal object OpenAiChatCompletionsProvider : AgentProviderClient {
                 finishReason = reason
             }
             if (reason == "error") {
-                error("模型接口 SSE 以 error 结束")
+                error(AppStrings.get(R.string.provider_err_sse_ended_error, "模型接口 SSE 以 error 结束"))
             }
             val delta = choice.optJSONObject("delta") ?: JSONObject()
             val reasoningDelta = visibleReasoningDelta(delta)
@@ -241,8 +276,12 @@ internal object OpenAiChatCompletionsProvider : AgentProviderClient {
             true
         }
 
-        if (!sawStreamData) throw AgentModelFailure.incompleteStream("模型接口未返回 SSE data chunk")
-        if (!sawDone && finishReason == null) throw AgentModelFailure.incompleteStream("模型接口 SSE 流未正常结束")
+        if (!sawStreamData) throw AgentModelFailure.incompleteStream(
+            AppStrings.get(R.string.provider_err_no_sse_chunk, "模型接口未返回 SSE data chunk"),
+        )
+        if (!sawDone && finishReason == null) throw AgentModelFailure.incompleteStream(
+            AppStrings.get(R.string.provider_err_sse_not_ended, "模型接口 SSE 流未正常结束"),
+        )
 
         finishActiveVisibleBlock()
         resolveToolCallIds(toolCalls.values, existingToolCallIds)
@@ -369,31 +408,43 @@ internal object OpenAiChatCompletionsProvider : AgentProviderClient {
             errorType?.let { "type=$it" },
         ).joinToString(", ")
         val message = streamError.optString("message")
-            .ifBlank { "未提供错误信息" }
+            .ifBlank { AppStrings.get(R.string.provider_err_no_error_message, "未提供错误信息") }
             .compactError()
+        val detailContext = context.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()
         throw AgentModelFailure.stream(
             streamError,
-            "模型接口 SSE 返回错误${context.takeIf { it.isNotBlank() }?.let { " ($it)" }.orEmpty()}：$message",
+            AppStrings.get(R.string.provider_err_sse_error_detail, "模型接口 SSE 返回错误%1\$s：%2\$s", detailContext, message),
         )
     }
 
     private fun parseUsage(chunk: JSONObject): AgentTokenUsage? {
         val usage = chunk.optJSONObject("usage") ?: return null
+        val cacheMiss = usage.firstInt("prompt_cache_miss_tokens")
+        val explicitCached = usage.firstNestedInt(
+            "prompt_tokens_details",
+            childKey = "cached_tokens"
+        ) ?: usage.firstInt("cache_read_input_tokens", "prompt_cache_hit_tokens", "cached_tokens")
+        val rawInput = usage.firstInt("prompt_tokens", "input_tokens")
+            ?: if (explicitCached != null && cacheMiss != null) explicitCached + cacheMiss else null
+        val resolvedCached = explicitCached
+            ?: if (rawInput != null && cacheMiss != null) (rawInput - cacheMiss).coerceAtLeast(0) else null
+        val cacheWrite = usage.firstNestedInt(
+            "prompt_tokens_details",
+            childKey = "cache_write_tokens",
+        ) ?: usage.firstInt("cache_creation_input_tokens", "cache_write_tokens")
         return AgentTokenUsage(
             contextTokens = usage.firstInt("total_tokens"),
-            inputTokens = usage.firstInt("prompt_tokens", "input_tokens"),
+            inputTokens = rawInput,
             outputTokens = usage.firstInt("completion_tokens", "output_tokens"),
             reasoningTokens = usage.firstNestedInt(
                 "completion_tokens_details",
                 "output_tokens_details",
                 childKey = "reasoning_tokens"
             ),
-            // 兼容端点各用各的字段：OpenAI 嵌套在 prompt_tokens_details，DeepSeek 为 prompt_cache_hit_tokens，
+            // 兼容端点各用各的字段：OpenAI 嵌套在 prompt_tokens_details，DeepSeek 为 prompt_cache_hit_tokens / prompt_cache_miss_tokens，
             // 部分端点直接放在顶层 cached_tokens。
-            cachedTokens = usage.firstNestedInt(
-                "prompt_tokens_details",
-                childKey = "cached_tokens"
-            ) ?: usage.firstInt("cache_read_input_tokens", "prompt_cache_hit_tokens", "cached_tokens")
+            cachedTokens = resolvedCached,
+            cacheWriteTokens = cacheWrite,
         ).takeUnless { it.isEmpty }
     }
 
@@ -427,6 +478,7 @@ internal object OpenAiChatCompletionsProvider : AgentProviderClient {
             outputTokens?.let { json.put("output_tokens", it) }
             reasoningTokens?.let { json.put("reasoning_tokens", it) }
             cachedTokens?.let { json.put("cached_tokens", it) }
+            cacheWriteTokens?.let { json.put("cache_write_tokens", it) }
         }
 
     private fun String.compactError(): String =

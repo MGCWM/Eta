@@ -19,8 +19,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.clearText
+import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.ArrowUpward
 import androidx.compose.material.icons.rounded.Stop
@@ -37,8 +40,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.Clipboard
 import androidx.compose.ui.platform.LocalClipboard
@@ -55,11 +61,6 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.itos.coui.menu.CouiMenuAnchor
-import com.itos.coui.menu.CouiMenuItem
-import com.itos.coui.menu.Menu
-import com.itos.coui.menu.couiMenuAnchor
-import com.itos.coui.menu.rememberCouiMenuAnchor
 import io.github.mangi.eta.R
 import io.github.mangi.eta.agent.terminal.isLinux
 import io.github.mangi.eta.data.model.AppearanceUiStyle
@@ -67,24 +68,32 @@ import io.github.mangi.eta.ui.app.LocalUiStyle
 import io.github.mangi.eta.ui.app.TerminalBlockUi
 import io.github.mangi.eta.ui.app.UserTerminalStore
 import io.github.mangi.eta.ui.components.EtaMonospace
+import io.github.mangi.eta.ui.components.EtaTopLayer
 import io.github.mangi.eta.ui.components.ansiPlainText
 import io.github.mangi.eta.ui.components.ansiToAnnotatedString
 import io.github.mangi.eta.ui.components.coui.CouiButton
 import io.github.mangi.eta.ui.components.coui.CouiButtonRole
+import io.github.mangi.eta.ui.components.coui.CouiMenu
+import io.github.mangi.eta.ui.components.coui.CouiMenuAnchor
+import io.github.mangi.eta.ui.components.coui.CouiMenuItem
+import io.github.mangi.eta.ui.components.coui.couiMenuAnchor
+import io.github.mangi.eta.ui.components.coui.rememberCouiMenuAnchor
+import io.github.mangi.eta.ui.components.currentGlassOverlayBackdrop
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.DropdownImpl
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
-import top.yukonga.miuix.kmp.basic.ListPopupColumn
-import top.yukonga.miuix.kmp.basic.PopupPositionProvider
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
+import top.yukonga.miuix.kmp.glass.GlassPopup
+import top.yukonga.miuix.kmp.glass.GlassPopupItem
+import top.yukonga.miuix.kmp.icon.MiuixIcons
+import top.yukonga.miuix.kmp.icon.glass.Copy
+import top.yukonga.miuix.kmp.icon.glass.Reply
 import top.yukonga.miuix.kmp.squircle.squircleBackground
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowListPopup
 
 /**
  * 用户手动终端：块式输出（命令、输出、退出码），给人用；与 AI 工具调用的任务模型分开。
@@ -97,7 +106,7 @@ internal fun UserTerminalScreen(
     onOpenConsole: (() -> Unit)? = null,
 ) {
     val state by store.uiState.collectAsState()
-    var input by remember { mutableStateOf("") }
+    val input = remember { TextFieldState() }
     var showTasks by remember { mutableStateOf(false) }
     var showSessions by remember { mutableStateOf(false) }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -117,7 +126,7 @@ internal fun UserTerminalScreen(
     val showLinuxGuide = state.environment.isLinux && !state.linuxReady
 
     fun submit() {
-        val command = input.trim()
+        val command = input.text.toString().trim()
         if (command.isEmpty()) return
         // 运行中输入发给前台进程 stdin，否则作为新命令执行。
         if (state.running) {
@@ -125,7 +134,7 @@ internal fun UserTerminalScreen(
         } else {
             store.send(command)
         }
-        input = ""
+        input.clearText()
     }
 
     Column(
@@ -159,7 +168,7 @@ internal fun UserTerminalScreen(
                 state.blocks.isEmpty() -> EmptyHint(state.failMessage)
                 else -> BlockList(
                     blocks = state.blocks,
-                    onReinput = { input = it },
+                    onReinput = { input.setTextAndPlaceCursorAtEnd(it) },
                 )
             }
         }
@@ -168,41 +177,38 @@ internal fun UserTerminalScreen(
                 input = input,
                 cwd = state.cwd,
                 running = state.running,
-                onInputChange = { input = it },
                 onSubmit = ::submit,
                 onStop = store::stop,
             )
         }
     }
 
-    if (showTasks) {
-        DaemonTasksDialog(
-            tasks = state.daemonTasks,
-            onDismiss = { showTasks = false },
-            onStop = store::stopDaemonTask,
-            onLoadLogs = store::daemonLogs,
-        )
-    }
+    DaemonTasksDialog(
+        show = showTasks,
+        tasks = state.daemonTasks,
+        onDismiss = { showTasks = false },
+        onStop = store::stopDaemonTask,
+        onLoadLogs = store::daemonLogs,
+    )
 
-    if (showSessions) {
-        SessionListDialog(
-            rows = state.sessions.map { session ->
-                SessionDialogRow(
-                    id = session.id,
-                    environment = session.environment,
-                    subtitle = session.cwd,
-                    active = session.id == state.activeSessionId,
-                    running = session.running,
-                    alive = session.alive,
-                )
-            },
-            onDismiss = { showSessions = false },
-            onSelect = store::switchSession,
-            onRestart = store::restartSession,
-            onClose = store::closeSession,
-            onNew = store::newSession,
-        )
-    }
+    SessionListDialog(
+        show = showSessions,
+        rows = state.sessions.map { session ->
+            SessionDialogRow(
+                id = session.id,
+                environment = session.environment,
+                subtitle = session.cwd,
+                active = session.id == state.activeSessionId,
+                running = session.running,
+                alive = session.alive,
+            )
+        },
+        onDismiss = { showSessions = false },
+        onSelect = store::switchSession,
+        onRestart = store::restartSession,
+        onClose = store::closeSession,
+        onNew = store::newSession,
+    )
 }
 
 @Composable
@@ -247,6 +253,7 @@ private fun CommandBlock(
     onReinput: (String) -> Unit,
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    var blockBounds by remember { mutableStateOf(Rect.Zero) }
     val clipboard = LocalClipboard.current
     val scope = rememberCoroutineScope()
     val colors = MiuixTheme.colorScheme
@@ -257,6 +264,7 @@ private fun CommandBlock(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .onGloballyPositioned { blockBounds = it.boundsInWindow() }
                 .couiMenuAnchor(anchor)
                 .combinedClickable(
                     interactionSource = remember { MutableInteractionSource() },
@@ -295,6 +303,7 @@ private fun CommandBlock(
             show = showMenu,
             hasOutput = block.output.isNotEmpty(),
             anchor = anchor,
+            anchorBounds = blockBounds,
             onDismiss = { showMenu = false },
             onCopyCommand = { scope.launch { clipboard.setPlainText(block.command) } },
             onCopyOutput = { scope.launch { clipboard.setPlainText(ansiPlainText(block.output)) } },
@@ -348,6 +357,7 @@ private fun BlockMenu(
     show: Boolean,
     hasOutput: Boolean,
     anchor: CouiMenuAnchor,
+    anchorBounds: Rect,
     onDismiss: () -> Unit,
     onCopyCommand: () -> Unit,
     onCopyOutput: () -> Unit,
@@ -365,7 +375,7 @@ private fun BlockMenu(
                     CouiMenuItem(value = 2, text = reinputText),
                 )
             }
-            Menu(
+            CouiMenu(
                 expanded = show,
                 onDismissRequest = onDismiss,
                 items = menuItems,
@@ -381,39 +391,35 @@ private fun BlockMenu(
             )
         }
         AppearanceUiStyle.MIUIX -> {
-            WindowListPopup(
-                show = show,
-                alignment = PopupPositionProvider.Align.Start,
-                onDismissRequest = onDismiss,
-            ) {
-                ListPopupColumn {
-                    DropdownImpl(
+            val overlayBackdrop = currentGlassOverlayBackdrop()
+            EtaTopLayer {
+                GlassPopup(
+                    show = show,
+                    onDismissRequest = onDismiss,
+                    anchorBounds = anchorBounds,
+                    backdrop = overlayBackdrop,
+                ) {
+                    GlassPopupItem(
                         text = copyCommandText,
-                        optionSize = 3,
-                        isSelected = false,
-                        index = 0,
-                        onSelectedIndexChange = {
+                        icon = MiuixIcons.Glass.Copy,
+                        onClick = {
                             onDismiss()
                             onCopyCommand()
                         },
                     )
-                    DropdownImpl(
+                    GlassPopupItem(
                         text = copyOutputText,
-                        optionSize = 3,
-                        isSelected = false,
-                        index = 1,
+                        icon = MiuixIcons.Glass.Copy,
                         enabled = hasOutput,
-                        onSelectedIndexChange = {
+                        onClick = {
                             onDismiss()
                             onCopyOutput()
                         },
                     )
-                    DropdownImpl(
+                    GlassPopupItem(
                         text = reinputText,
-                        optionSize = 3,
-                        isSelected = false,
-                        index = 2,
-                        onSelectedIndexChange = {
+                        icon = MiuixIcons.Glass.Reply,
+                        onClick = {
                             onDismiss()
                             onReinput()
                         },
@@ -441,15 +447,14 @@ private fun SystemBlock(block: TerminalBlockUi) {
  */
 @Composable
 private fun InputPanel(
-    input: String,
+    input: TextFieldState,
     cwd: String,
     running: Boolean,
-    onInputChange: (String) -> Unit,
     onSubmit: () -> Unit,
     onStop: () -> Unit,
 ) {
     val colors = MiuixTheme.colorScheme
-    val canSend = input.isNotBlank()
+    val canSend = input.text.isNotBlank()
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -466,19 +471,18 @@ private fun InputPanel(
             )
         }
         TextField(
-            value = input,
-            onValueChange = onInputChange,
+            state = input,
+            lineLimits = TextFieldLineLimits.SingleLine,
             modifier = Modifier.fillMaxWidth(),
             label = stringResource(
                 if (running) R.string.terminal_input_running_hint else R.string.terminal_input_hint,
             ),
             useLabelAsPlaceholder = true,
-            singleLine = true,
             keyboardOptions = KeyboardOptions(
                 imeAction = ImeAction.Send,
                 autoCorrectEnabled = false,
             ),
-            keyboardActions = KeyboardActions(onSend = { onSubmit() }),
+            onKeyboardAction = { onSubmit() },
             textStyle = MiuixTheme.textStyles.body2.copy(fontFamily = EtaMonospace),
             trailingIcon = {
                 val stopMode = running && !canSend

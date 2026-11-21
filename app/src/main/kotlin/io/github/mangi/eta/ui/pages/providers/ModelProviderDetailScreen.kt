@@ -7,16 +7,23 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -33,20 +40,20 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.itos.coui.layout.CouiPageDefaults
-import com.itos.coui.layout.Divider
-import com.itos.coui.layout.Group
-import com.itos.coui.text.CouiTextKind
-import com.itos.coui.text.Text as CouiText
 import io.github.mangi.eta.EtaApp
 import io.github.mangi.eta.R
+import io.github.mangi.eta.data.datastore.SettingsDataStore
 import io.github.mangi.eta.data.model.AnthropicProviderSetting
 import io.github.mangi.eta.data.model.AppearanceUiStyle
 import io.github.mangi.eta.data.model.CustomProviderSetting
+import io.github.mangi.eta.data.model.GeminiEndpointMode
 import io.github.mangi.eta.data.model.GeminiProviderSetting
 import io.github.mangi.eta.data.model.OpenAiEndpointMode
 import io.github.mangi.eta.data.model.ProviderSetting
 import io.github.mangi.eta.data.model.withId
+import io.github.mangi.eta.data.model.withModels
+import io.github.mangi.eta.data.provider.BuiltinProviders
+import io.github.mangi.eta.data.provider.OfficialModelCatalog
 import io.github.mangi.eta.data.repository.ProviderRepository
 import io.github.mangi.eta.data.repository.RemoteModelFetcher
 import io.github.mangi.eta.data.repository.RuntimeConfigRepository
@@ -57,34 +64,47 @@ import io.github.mangi.eta.ui.components.MiuixScaffold
 import io.github.mangi.eta.ui.components.MiuixScaffoldPage
 import io.github.mangi.eta.ui.components.StatusError
 import io.github.mangi.eta.ui.components.StatusSuccess
+import io.github.mangi.eta.ui.components.coui.CouiPageDefaults
+import io.github.mangi.eta.ui.components.coui.CouiPreferenceGroup
+import io.github.mangi.eta.ui.components.currentGlassOverlayBackdrop
 import io.github.mangi.eta.ui.components.coui.CouiButton
 import io.github.mangi.eta.ui.components.coui.CouiButtonRole
-import io.github.mangi.eta.ui.components.coui.CouiChipTabs
 import io.github.mangi.eta.ui.components.coui.CouiConfirmDialog
 import io.github.mangi.eta.ui.components.coui.CouiPageBottomSpacer
 import io.github.mangi.eta.ui.components.coui.CouiPreference
 import io.github.mangi.eta.ui.components.coui.CouiScaffold
 import io.github.mangi.eta.ui.components.coui.CouiScaffoldPage
+import io.github.mangi.eta.ui.components.coui.CouiSegmentedTabs
 import io.github.mangi.eta.ui.components.coui.CouiSwitchPreference
 import io.github.mangi.eta.ui.components.coui.CouiTextField
+import io.github.mangi.eta.ui.components.rememberDraftTextFieldState
 import io.github.mangi.eta.ui.layout.horizontalCutoutPadding
 import io.github.mangi.eta.ui.navigation.NewProviderType
+import io.github.mangi.eta.ui.components.coui.CouiCardDivider as CouiDivider
+import io.github.suqi8.coui.kmp.utils.overScrollVertical as couiOverScrollVertical
+import io.github.suqi8.coui.kmp.utils.rememberCOUIFlingBehavior
+import io.github.suqi8.coui.kmp.utils.scrollEndHaptic as couiScrollEndHaptic
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.TabRow
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
-import top.yukonga.miuix.kmp.overlay.OverlayDialog
+import top.yukonga.miuix.kmp.basic.rememberTopAppBarState
+import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import top.yukonga.miuix.kmp.glass.GlassDialog
+import top.yukonga.miuix.kmp.glass.GlassSegmentedTabRow
+import top.yukonga.miuix.kmp.glass.GlassTopAppBarDefaults
 import top.yukonga.miuix.kmp.preference.SwitchPreference
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
+import top.yukonga.miuix.kmp.utils.springAnimateToPage
 
 @Composable
 internal fun ModelProviderDetailScreen(
@@ -92,7 +112,6 @@ internal fun ModelProviderDetailScreen(
     newType: NewProviderType? = null,
     onBack: () -> Unit,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val providers by ProviderRepository.providersFlow().collectAsState(initial = emptyList())
     var createdId by remember { mutableStateOf<String?>(null) }
@@ -116,6 +135,8 @@ internal fun ModelProviderDetailScreen(
             NewProviderType.Gemini -> GeminiProviderSetting(
                 id = "",
                 name = "",
+                endpointMode = GeminiEndpointMode.AI_STUDIO,
+                baseUrl = GeminiProviderSetting.DEFAULT_BASE_URL,
             )
             null -> null
         }
@@ -173,34 +194,46 @@ internal fun ModelProviderDetailScreen(
 
     val initial = provider ?: draft!!
     val isNew = provider == null
+    val providerDisplayName = BuiltinProviders.defaultNameRes(initial.id, initial.name)?.let { stringResource(it) } ?: initial.name
     var currentTab by remember { mutableIntStateOf(0) }
     var configDraft by rememberSaveable(
         initial.id,
         stateSaver = ProviderConfigDraftSaver,
     ) {
-        mutableStateOf(ProviderConfigDraft.from(initial))
+        mutableStateOf(
+            ProviderConfigDraft.from(initial).let { base ->
+                if (isNew) base else base.copy(name = providerDisplayName)
+            },
+        )
     }
-    val title = if (isNew) context.getString(R.string.page_create_new_provider_36cab9) else initial.name
+    val title = if (isNew) stringResource(R.string.page_create_new_provider_36cab9) else providerDisplayName
     val tabs = listOf(
-        context.getString(R.string.page_configuration_d7d7ce),
-        context.getString(R.string.page_model_98fd0c),
+        stringResource(R.string.page_configuration_d7d7ce),
+        stringResource(R.string.page_model_98fd0c),
     )
 
     when (LocalUiStyle.current) {
         AppearanceUiStyle.COUI -> {
-            CouiScaffold(title = title, onBack = onBack, compactTitle = true) { contentPadding, _, nestedScrollConnection, sidePadding ->
+            CouiScaffold(title = title, onBack = onBack, compactTitle = true) { contentPadding, rawPadding, nestedScrollConnection, sidePadding ->
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .horizontalCutoutPadding()
-                        .padding(top = contentPadding.calculateTopPadding()),
+                        .padding(
+                            top = contentPadding.calculateTopPadding(),
+                            bottom = contentPadding.calculateBottomPadding(),
+                        )
+                        .consumeWindowInsets(rawPadding),
                 ) {
                     if (!isNew) {
-                        CouiChipTabs(
+                        CouiSegmentedTabs(
                             items = tabs.mapIndexed { index, label -> index to label },
                             selectedKey = currentTab,
                             onSelectedKeyChange = { currentTab = it },
-                            modifier = Modifier.padding(horizontal = sidePadding),
+                            modifier = Modifier.padding(
+                                horizontal = sidePadding + CouiPageDefaults.horizontalMargin,
+                                vertical = 8.dp,
+                            ),
                         )
                     }
                     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -230,43 +263,93 @@ internal fun ModelProviderDetailScreen(
             }
         }
         AppearanceUiStyle.MIUIX -> {
-            MiuixScaffold(title = title, onBack = onBack) { paddingValues, scrollBehavior, sidePadding ->
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .horizontalCutoutPadding()
-                        .padding(top = paddingValues.calculateTopPadding()),
-                ) {
+            val pagerState = rememberPagerState(initialPage = currentTab, pageCount = { if (isNew) 1 else tabs.size })
+            val currentPage by remember { derivedStateOf { pagerState.currentPage } }
+            val configListState = rememberLazyListState()
+            val modelsListState = rememberLazyListState()
+            val configTopBarState = rememberTopAppBarState()
+            val modelsTopBarState = rememberTopAppBarState()
+            val activeListState = if (currentPage == 0) configListState else modelsListState
+            val isContentScrolled by remember(activeListState) {
+                derivedStateOf { activeListState.canScrollBackward }
+            }
+            val scrollBehavior = MiuixScrollBehavior(
+                state = if (currentPage == 0) configTopBarState else modelsTopBarState,
+            )
+            MiuixScaffold(
+                title = title,
+                onBack = onBack,
+                scrollBehavior = scrollBehavior,
+                isContentScrolled = isContentScrolled,
+                topBarBottomContent = { backdrop ->
+                    val fallbackBackdrop = rememberLayerBackdrop()
                     if (!isNew) {
-                        TabRow(
+                        GlassSegmentedTabRow(
                             tabs = tabs,
-                            selectedTabIndex = currentTab,
-                            onTabSelected = { currentTab = it },
-                            modifier = Modifier.padding(
-                                horizontal = sidePadding + 12.dp,
-                                vertical = 8.dp,
-                            ),
+                            selectedIndex = pagerState.targetPage,
+                            onSelect = { index ->
+                                currentTab = index
+                                scope.launch { pagerState.springAnimateToPage(index) }
+                            },
+                            backdrop = backdrop ?: fallbackBackdrop,
+                            surfaceAlpha = if (backdrop != null) 1f else 0f,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = GlassTopAppBarDefaults.HorizontalPadding)
+                                .padding(top = 6.dp, bottom = 12.dp),
                         )
                     }
-                    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                        when (currentTab) {
-                            0 -> ProviderConfigTab(
-                                provider = initial,
-                                draft = configDraft,
-                                onDraftChange = { configDraft = it },
-                                scope = scope,
-                                isNew = isNew,
-                                scrollBehavior = scrollBehavior,
-                                contentSidePadding = sidePadding,
-                                onCreated = { id -> createdId = id },
-                                onDeleted = onBack,
-                            )
-                            1 -> if (!isNew) {
-                                ProviderModelsTab(
+                },
+            ) { paddingValues, activeScrollBehavior, sidePadding ->
+                val topPadding = paddingValues.calculateTopPadding()
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .horizontalCutoutPadding(),
+                ) {
+                    if (isNew) {
+                        ProviderConfigTab(
+                            provider = initial,
+                            draft = configDraft,
+                            onDraftChange = { configDraft = it },
+                            scope = scope,
+                            isNew = true,
+                            scrollBehavior = activeScrollBehavior,
+                            contentSidePadding = sidePadding,
+                            contentTopPadding = topPadding,
+                            listState = configListState,
+                            onCreated = { id -> createdId = id },
+                            onDeleted = onBack,
+                        )
+                    } else {
+                        HorizontalPager(
+                            state = pagerState,
+                            modifier = Modifier.fillMaxSize(),
+                            userScrollEnabled = false,
+                            beyondViewportPageCount = 1,
+                            key = { it },
+                        ) { page ->
+                            when (page) {
+                                0 -> ProviderConfigTab(
+                                    provider = initial,
+                                    draft = configDraft,
+                                    onDraftChange = { configDraft = it },
+                                    scope = scope,
+                                    isNew = false,
+                                    scrollBehavior = activeScrollBehavior,
+                                    contentSidePadding = sidePadding,
+                                    contentTopPadding = topPadding,
+                                    listState = configListState,
+                                    onCreated = { id -> createdId = id },
+                                    onDeleted = onBack,
+                                )
+                                1 -> ProviderModelsTab(
                                     provider = initial,
                                     scope = scope,
-                                    scrollBehavior = scrollBehavior,
+                                    scrollBehavior = activeScrollBehavior,
                                     contentSidePadding = sidePadding,
+                                    contentTopPadding = topPadding,
+                                    listState = modelsListState,
                                 )
                             }
                         }
@@ -287,6 +370,8 @@ private fun ProviderConfigTab(
     scrollBehavior: ScrollBehavior? = null,
     nestedScrollConnection: NestedScrollConnection? = scrollBehavior?.nestedScrollConnection,
     contentSidePadding: Dp,
+    contentTopPadding: Dp = 0.dp,
+    listState: LazyListState = rememberLazyListState(),
     onCreated: (String) -> Unit,
     onDeleted: () -> Unit,
 ) {
@@ -350,8 +435,16 @@ private fun ProviderConfigTab(
                 val built = draft.toProvider(provider)
                 try {
                     if (isNew) {
+                        val seeded = if (built is GeminiProviderSetting && built.isVertexAi && built.models.isEmpty()) {
+                            val presets = OfficialModelCatalog.modelsForProvider(built).map { model ->
+                                model.copy(id = ProviderRepository.newId(), isBuiltIn = false)
+                            }
+                            built.withModels(presets)
+                        } else {
+                            built
+                        }
                         val added = ProviderRepository.addProvider(
-                            built.withId(ProviderRepository.newId()),
+                            seeded.withId(ProviderRepository.newId()),
                         )
                         if (added.isEnabled) {
                             RuntimeConfigRepository.setSelectedProviderId(added.id)
@@ -389,17 +482,37 @@ private fun ProviderConfigTab(
         }
     }
 
+    val scrollState = scrollBehavior?.state
+    val onOverscrollChanged: (Float) -> Unit = remember(scrollState) {
+        { scrollState?.overscrollOffset = it }
+    }
+    val scrollModifier = if (uiStyle == AppearanceUiStyle.COUI) {
+        Modifier
+            .couiScrollEndHaptic()
+            .couiOverScrollVertical()
+    } else {
+        Modifier
+            .scrollEndHaptic()
+            .overScrollVertical(onOffsetChanged = onOverscrollChanged)
+    }
+    val flingBehavior = if (uiStyle == AppearanceUiStyle.COUI) {
+        rememberCOUIFlingBehavior()
+    } else {
+        androidx.compose.foundation.gestures.ScrollableDefaults.flingBehavior()
+    }
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .imePadding()
-            .scrollEndHaptic()
-            .overScrollVertical()
+            .then(scrollModifier)
             .then(if (nestedScrollConnection != null) Modifier.nestedScroll(nestedScrollConnection) else Modifier),
         contentPadding = PaddingValues(
             start = contentSidePadding,
+            top = contentTopPadding,
             end = contentSidePadding,
         ),
+        flingBehavior = flingBehavior,
         overscrollEffect = null,
     ) {
         item(key = "connection") {
@@ -425,7 +538,7 @@ private fun ProviderConfigTab(
                     onCancel = loginStore::cancel,
                 )
                 if (uiStyle == AppearanceUiStyle.COUI) {
-                    Divider()
+                    CouiDivider()
                     CouiPreference(
                         title = stringResource(R.string.ui_test_connection_10b7d8),
                         summary = testStatus,
@@ -467,30 +580,29 @@ private fun ProviderConfigTab(
                 }
             }
             if (uiStyle == AppearanceUiStyle.COUI) {
-                Group(title = stringResource(R.string.ui_system_prompt_word_193981)) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = CouiPageDefaults.rowPadding, vertical = 12.dp),
-                    ) {
-                        CouiTextField(
-                            value = draft.systemPrompt,
-                            onValueChange = { onDraftChange(draft.copy(systemPrompt = it)) },
-                            placeholder = stringResource(R.string.ui_leave_blank_to_use_the_default_mobile_agent_prompt_w_21e7c8),
-                            singleLine = false,
-                            minLines = 4,
-                        )
+                CouiPreferenceGroup(title = stringResource(R.string.ui_system_prompt_word_193981)) {
+                    item {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = CouiPageDefaults.rowPadding, vertical = 12.dp),
+                        ) {
+                            CouiTextField(
+                                state = rememberDraftTextFieldState(draft.systemPrompt) { onDraftChange(draft.copy(systemPrompt = it)) },
+                                placeholder = stringResource(R.string.ui_leave_blank_to_use_the_default_mobile_agent_prompt_w_21e7c8),
+                                singleLine = false,
+                                minLines = 4,
+                            )
+                        }
                     }
                 }
             } else {
                 SmallTitle(text = stringResource(R.string.ui_system_prompt_word_193981))
                 TextField(
-                    value = draft.systemPrompt,
-                    onValueChange = { onDraftChange(draft.copy(systemPrompt = it)) },
+                    state = rememberDraftTextFieldState(draft.systemPrompt) { onDraftChange(draft.copy(systemPrompt = it)) },
+                    lineLimits = TextFieldLineLimits.MultiLine(minHeightInLines = 4),
                     label = stringResource(R.string.ui_leave_blank_to_use_the_default_mobile_agent_prompt_w_21e7c8),
                     useLabelAsPlaceholder = true,
-                    singleLine = false,
-                    minLines = 4,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 12.dp)
@@ -500,17 +612,22 @@ private fun ProviderConfigTab(
         }
 
         item(key = "actions") {
-            val saveText = when {
-                isWorking -> context.getString(R.string.page_saving_d70d42)
-                creationCommitted -> context.getString(R.string.page_created_62cfc5)
-                isNew -> context.getString(R.string.page_create_fcbd09)
-                else -> context.getString(R.string.page_save_configuration_817af1)
-            }
-            val removeText = if (provider.isBuiltIn) {
-                context.getString(R.string.page_reset_built_in_configuration_35b6ec)
-            } else {
-                context.getString(R.string.page_remove_provider_9f848f)
-            }
+            val saveText = stringResource(
+                when {
+                    isWorking -> R.string.page_saving_d70d42
+                    creationCommitted -> R.string.page_created_62cfc5
+                    isNew -> R.string.page_create_fcbd09
+                    else -> R.string.page_save_configuration_817af1
+                },
+            )
+            val removeText = stringResource(
+                if (provider.isBuiltIn) {
+                    R.string.page_reset_built_in_configuration_35b6ec
+                } else {
+                    R.string.page_remove_provider_9f848f
+                },
+            )
+            val failPrefix = stringResource(R.string.page_fail_3e3c80)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -565,7 +682,7 @@ private fun ProviderConfigTab(
                     Text(
                         text = message,
                         style = MiuixTheme.textStyles.footnote2,
-                        color = if (message.startsWith(context.getString(R.string.page_fail_3e3c80))) StatusError else StatusSuccess,
+                        color = if (message.startsWith(failPrefix)) StatusError else StatusSuccess,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(top = 8.dp),
                     )
@@ -582,116 +699,110 @@ private fun ProviderConfigTab(
         }
     }
 
-    if (showDeleteDialog) {
-        val deleteConfirmText = if (isWorking) context.getString(R.string.page_deleting_6f941d) else context.getString(R.string.page_delete_3755f5)
-        val onConfirmDelete: () -> Unit = {
-            scope.launch {
-                isWorking = true
-                try {
-                    ProviderRepository.deleteProvider(provider.id)
-                    RuntimeConfigRepository.syncToRemotePreferences(EtaApp.serviceInstance)
-                    showDeleteDialog = false
-                    onDeleted()
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (throwable: Throwable) {
-                    status = context.getString(
-                        R.string.provider_error,
-                        throwable.message ?: context.getString(R.string.provider_delete_failed),
-                    )
-                    showDeleteDialog = false
-                } finally {
-                    isWorking = false
-                }
+    val providerDisplayName = BuiltinProviders.defaultNameRes(provider.id, provider.name)?.let { stringResource(it) } ?: provider.name
+    val deleteConfirmText = stringResource(if (isWorking) R.string.page_deleting_6f941d else R.string.page_delete_3755f5)
+    val onConfirmDelete: () -> Unit = {
+        scope.launch {
+            isWorking = true
+            try {
+                ProviderRepository.deleteProvider(provider.id)
+                RuntimeConfigRepository.syncToRemotePreferences(EtaApp.serviceInstance)
+                showDeleteDialog = false
+                onDeleted()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (throwable: Throwable) {
+                status = context.getString(
+                    R.string.provider_error,
+                    throwable.message ?: context.getString(R.string.provider_delete_failed),
+                )
+                showDeleteDialog = false
+            } finally {
+                isWorking = false
             }
         }
-        when (uiStyle) {
-            AppearanceUiStyle.COUI -> {
-                CouiConfirmDialog(
-                    visible = true,
-                    title = stringResource(R.string.ui_remove_provider_9f848f),
-                    message = stringResource(R.string.provider_delete_summary, provider.name),
-                    confirmText = deleteConfirmText,
-                    confirmEnabled = !isWorking,
-                    cancelEnabled = !isWorking,
-                    destructive = true,
-                    onConfirm = onConfirmDelete,
-                    onDismissRequest = { if (!isWorking) showDeleteDialog = false },
+    }
+    val resetConfirmText = stringResource(if (isWorking) R.string.page_resetting_616090 else R.string.page_reset_3d8134)
+    val onConfirmReset: () -> Unit = {
+        scope.launch {
+            isWorking = true
+            try {
+                ProviderRepository.resetBuiltIn(provider.id)
+                RuntimeConfigRepository.syncToRemotePreferences(EtaApp.serviceInstance)
+                status = context.getString(R.string.page_reset_a0cc65)
+                showResetDialog = false
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (throwable: Throwable) {
+                status = context.getString(
+                    R.string.provider_error,
+                    throwable.message ?: context.getString(R.string.provider_reset_failed),
                 )
-            }
-            AppearanceUiStyle.MIUIX -> {
-                OverlayDialog(
-                    show = true,
-                    title = stringResource(R.string.ui_remove_provider_9f848f),
-                    summary = stringResource(R.string.provider_delete_summary, provider.name),
-                    onDismissRequest = { if (!isWorking) showDeleteDialog = false },
-                ) {
-                    MiuixDialogActions(
-                        confirmText = deleteConfirmText,
-                        cancelEnabled = !isWorking,
-                        confirmEnabled = !isWorking,
-                        destructive = true,
-                        onCancel = { showDeleteDialog = false },
-                        onConfirm = onConfirmDelete,
-                    )
-                }
+                showResetDialog = false
+            } finally {
+                isWorking = false
             }
         }
     }
 
-    if (showResetDialog) {
-        val resetConfirmText = if (isWorking) context.getString(R.string.page_resetting_616090) else context.getString(R.string.page_reset_3d8134)
-        val onConfirmReset: () -> Unit = {
-            scope.launch {
-                isWorking = true
-                try {
-                    ProviderRepository.resetBuiltIn(provider.id)
-                    RuntimeConfigRepository.syncToRemotePreferences(EtaApp.serviceInstance)
-                    status = context.getString(R.string.page_reset_a0cc65)
-                    showResetDialog = false
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (throwable: Throwable) {
-                    status = context.getString(
-                        R.string.provider_error,
-                        throwable.message ?: context.getString(R.string.provider_reset_failed),
-                    )
-                    showResetDialog = false
-                } finally {
-                    isWorking = false
-                }
-            }
+    when (uiStyle) {
+        AppearanceUiStyle.COUI -> {
+            CouiConfirmDialog(
+                visible = showDeleteDialog,
+                title = stringResource(R.string.ui_remove_provider_9f848f),
+                message = stringResource(R.string.provider_delete_summary, providerDisplayName),
+                confirmText = deleteConfirmText,
+                confirmEnabled = !isWorking,
+                cancelEnabled = !isWorking,
+                destructive = true,
+                onConfirm = onConfirmDelete,
+                onDismissRequest = { if (!isWorking) showDeleteDialog = false },
+            )
+            CouiConfirmDialog(
+                visible = showResetDialog,
+                title = stringResource(R.string.ui_reset_built_in_configuration_35b6ec),
+                message = stringResource(R.string.provider_reset_summary, providerDisplayName),
+                confirmText = resetConfirmText,
+                confirmEnabled = !isWorking,
+                cancelEnabled = !isWorking,
+                destructive = true,
+                onConfirm = onConfirmReset,
+                onDismissRequest = { if (!isWorking) showResetDialog = false },
+            )
         }
-        when (uiStyle) {
-            AppearanceUiStyle.COUI -> {
-                CouiConfirmDialog(
-                    visible = true,
-                    title = stringResource(R.string.ui_reset_built_in_configuration_35b6ec),
-                    message = stringResource(R.string.provider_reset_summary, provider.name),
-                    confirmText = resetConfirmText,
-                    confirmEnabled = !isWorking,
+        AppearanceUiStyle.MIUIX -> {
+            val overlayBackdrop = currentGlassOverlayBackdrop()
+            GlassDialog(
+                show = showDeleteDialog,
+                backdrop = overlayBackdrop,
+                title = stringResource(R.string.ui_remove_provider_9f848f),
+                summary = stringResource(R.string.provider_delete_summary, providerDisplayName),
+                onDismissRequest = { if (!isWorking) showDeleteDialog = false },
+            ) {
+                MiuixDialogActions(
+                    confirmText = deleteConfirmText,
                     cancelEnabled = !isWorking,
+                    confirmEnabled = !isWorking,
                     destructive = true,
-                    onConfirm = onConfirmReset,
-                    onDismissRequest = { if (!isWorking) showResetDialog = false },
+                    onCancel = { showDeleteDialog = false },
+                    onConfirm = onConfirmDelete,
                 )
             }
-            AppearanceUiStyle.MIUIX -> {
-                OverlayDialog(
-                    show = true,
-                    title = stringResource(R.string.ui_reset_built_in_configuration_35b6ec),
-                    summary = stringResource(R.string.provider_reset_summary, provider.name),
-                    onDismissRequest = { if (!isWorking) showResetDialog = false },
-                ) {
-                    MiuixDialogActions(
-                        confirmText = resetConfirmText,
-                        cancelEnabled = !isWorking,
-                        confirmEnabled = !isWorking,
-                        destructive = true,
-                        onCancel = { showResetDialog = false },
-                        onConfirm = onConfirmReset,
-                    )
-                }
+            GlassDialog(
+                show = showResetDialog,
+                backdrop = overlayBackdrop,
+                title = stringResource(R.string.ui_reset_built_in_configuration_35b6ec),
+                summary = stringResource(R.string.provider_reset_summary, providerDisplayName),
+                onDismissRequest = { if (!isWorking) showResetDialog = false },
+            ) {
+                MiuixDialogActions(
+                    confirmText = resetConfirmText,
+                    cancelEnabled = !isWorking,
+                    confirmEnabled = !isWorking,
+                    destructive = true,
+                    onCancel = { showResetDialog = false },
+                    onConfirm = onConfirmReset,
+                )
             }
         }
     }
@@ -700,8 +811,21 @@ private fun ProviderConfigTab(
 private suspend fun testConnection(
     context: android.content.Context,
     provider: ProviderSetting,
-): String =
-    RemoteModelFetcher.fetch(provider)
+): String {
+    if (provider is GeminiProviderSetting && provider.isVertexAi) {
+        val selectedModelId = RuntimeConfigRepository.cachedSelectedModelId()
+            ?.takeIf { selected -> provider.models.any { it.id == selected && it.isEnabled } }
+            ?: provider.id.takeIf(String::isNotBlank)?.let { SettingsDataStore.selectedModelIdForProvider(it) }
+        return RemoteModelFetcher.testVertexConnection(provider, preferredModelId = selectedModelId)
+            .map { modelId -> context.getString(R.string.provider_i18n_vertex_test_ok, modelId) }
+            .getOrElse { throwable ->
+                context.getString(
+                    R.string.provider_error,
+                    throwable.message ?: throwable.javaClass.simpleName,
+                )
+            }
+    }
+    return RemoteModelFetcher.fetch(provider)
         .map { context.resources.getQuantityString(R.plurals.provider_models_fetched, it.size, it.size) }
         .getOrElse { throwable ->
             context.getString(
@@ -709,3 +833,4 @@ private suspend fun testConnection(
                 throwable.message ?: throwable.javaClass.simpleName,
             )
         }
+}

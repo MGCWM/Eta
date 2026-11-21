@@ -8,8 +8,7 @@ import java.nio.file.Files
 /**
  * 管理内置与自定义 Subagent Profile。
  *
- * 自定义 Subagent 存放在默认工作区的 `agents/<name>.md`，采用与 Kimi Code 一致的
- * YAML frontmatter + Markdown 正文格式：
+ * 自定义 Subagent 存放在默认工作区的 `agents/<name>.md`，采用 YAML frontmatter + Markdown 正文格式：
  * ```markdown
  * ---
  * name: bill-analyzer
@@ -46,6 +45,13 @@ internal object SubagentProfileCatalog {
 
     fun listCustom(agentsDir: File = defaultAgentsDir()): List<SubagentProfile> =
         discoverCustomProfiles(agentsDir)
+
+    fun existsCustomProfile(name: String, agentsDir: File = defaultAgentsDir()): Boolean {
+        val normalizedName = name.trim().lowercase()
+        if (!isValidName(normalizedName) || !agentsDir.exists()) return false
+        val targetFile = File(agentsDir, "$normalizedName.md")
+        return targetFile.isFile && !Files.isSymbolicLink(targetFile.toPath())
+    }
 
     fun get(name: String, agentsDir: File = defaultAgentsDir()): SubagentProfile? {
         val normalized = name.trim().lowercase()
@@ -155,12 +161,13 @@ internal object SubagentProfileCatalog {
             ?: file.nameWithoutExtension.trim().lowercase()
         if (!isValidName(rawName)) return null
 
-        val description = frontmatter["description"]?.trim().orEmpty()
+        val description = unescapeYamlDoubleQuoted(frontmatter["description"]?.trim().orEmpty())
         if (description.isEmpty()) return null
         val body = parsed.body.trim()
         if (body.isEmpty()) return null
 
         val whenToUse = (frontmatter["whenToUse"] ?: frontmatter["when_to_use"])?.trim()
+            ?.let(::unescapeYamlDoubleQuoted)
             .takeUnless { it.isNullOrBlank() }
             ?: description
         val override = frontmatter["override"]?.trim()?.equals("true", ignoreCase = true) == true
@@ -235,10 +242,31 @@ internal object SubagentProfileCatalog {
 
     private fun quoteYamlIfNeeded(value: String): String {
         val singleLine = value.replace("\n", " ").trim()
-        return if (singleLine.any { it in ":[]{},#&*!|>'\"%@`" }) {
+        return if (singleLine.any { it in ":[]{},#&*!|>'\"%@`\\" }) {
             "\"${singleLine.replace("\\", "\\\\").replace("\"", "\\\"")}\""
         } else {
             singleLine
+        }
+    }
+
+    /** 与 [quoteYamlIfNeeded] 对称反转义，避免引号与反斜杠在编辑保存后逐次翻倍。 */
+    private fun unescapeYamlDoubleQuoted(value: String): String {
+        if ('\\' !in value) return value
+        return buildString(value.length) {
+            var index = 0
+            while (index < value.length) {
+                val ch = value[index]
+                if (ch == '\\' && index + 1 < value.length) {
+                    val next = value[index + 1]
+                    if (next == '"' || next == '\\') {
+                        append(next)
+                        index += 2
+                        continue
+                    }
+                }
+                append(ch)
+                index += 1
+            }
         }
     }
 }

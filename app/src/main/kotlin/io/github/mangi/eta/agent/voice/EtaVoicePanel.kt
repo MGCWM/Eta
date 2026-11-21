@@ -9,9 +9,9 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -19,13 +19,14 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -34,48 +35,61 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
-import androidx.compose.ui.input.nestedscroll.NestedScrollSource
-import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.unit.Velocity
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import io.github.mangi.eta.R
 import io.github.mangi.eta.ui.components.AgentConversationMessages
 import io.github.mangi.eta.ui.model.AgentChatMessageUi
 import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlin.math.sign
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.anim.folmeSpring
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.basic.Text
 
 internal enum class EtaVoicePhase {
     READY,
@@ -86,76 +100,16 @@ internal enum class EtaVoicePhase {
 internal data class EtaVoiceUiState(
     val messages: List<AgentChatMessageUi> = emptyList(),
     val phase: EtaVoicePhase = EtaVoicePhase.READY,
-    val status: EtaVoiceStatus = EtaVoiceStatus.InputRequest,
 )
 
-internal sealed interface EtaVoiceStatus {
-    data object InputRequest : EtaVoiceStatus
-    data object Reasoning : EtaVoiceStatus
-    data object Completed : EtaVoiceStatus
-    data class RunningTool(val name: String) : EtaVoiceStatus
-    data class Failed(val detail: String?) : EtaVoiceStatus
-    data object Stopped : EtaVoiceStatus
-}
-
-internal data class EtaVoicePanelColors(
-    val content: Color,
-    val input: Color,
-    val focusedInput: Color,
-    val chipBackground: Color,
-    val inputPrimary: Color,
-    val inputSecondary: Color,
-    val inputTertiary: Color,
-    val tertiary: Color,
-    val panelStroke: Color,
-    val chipStroke: Color,
-    val scrim: Color,
-    val bottomBackdrop: Color,
-)
-
-@Composable
-private fun rememberEtaVoicePanelColors(): EtaVoicePanelColors {
-    val dark = MiuixTheme.colorScheme.background.luminance() < 0.5f
-    return remember(dark) {
-        if (dark) {
-            EtaVoicePanelColors(
-                content = Color(0xFF16171A),
-                input = Color(0xF2222429),
-                focusedInput = Color(0xFF2B2E35),
-                chipBackground = Color(0xE6222429),
-                inputPrimary = Color(0xF0FFFFFF),
-                inputSecondary = Color(0x9EFFFFFF),
-                inputTertiary = Color(0x52FFFFFF),
-                tertiary = Color(0x38FFFFFF),
-                panelStroke = Color(0x14FFFFFF),
-                chipStroke = Color(0x18FFFFFF),
-                scrim = Color(0x48000000),
-                bottomBackdrop = Color(0xF50E0F12),
-            )
-        } else {
-            EtaVoicePanelColors(
-                content = Color(0xFFFAFAFC),
-                input = Color(0xFAFFFFFF),
-                focusedInput = Color.White,
-                chipBackground = Color(0xF5FFFFFF),
-                inputPrimary = Color(0xE6111318),
-                inputSecondary = Color(0x8F111318),
-                inputTertiary = Color(0x4D111318),
-                tertiary = Color(0x24111318),
-                panelStroke = Color(0xCCFFFFFF),
-                chipStroke = Color(0x12000000),
-                scrim = Color(0x26000000),
-                bottomBackdrop = Color(0xFAF2F3F7),
-            )
-        }
-    }
-}
+private val CouiEnterEasing = CubicBezierEasing(0.20f, 0f, 0f, 1f)
+private val CouiExitEasing = CubicBezierEasing(0.30f, 0f, 1f, 1f)
 
 @Composable
 internal fun EtaVoicePanel(
     speechLevel: () -> Float,
     state: EtaVoiceUiState,
-    input: String,
+    input: TextFieldState,
     speech: EtaSpeechState,
     recognitionEnabled: Boolean?,
     entranceComplete: Boolean,
@@ -171,7 +125,7 @@ internal fun EtaVoicePanel(
     canOpenConversation: Boolean,
     handoffRunning: Boolean,
     exitRequested: Boolean,
-    onInputChange: (String) -> Unit,
+    onInputEdited: () -> Unit,
     onSuggestionClick: (String) -> Unit,
     onSubmit: () -> Unit,
     onStop: () -> Unit,
@@ -186,28 +140,40 @@ internal fun EtaVoicePanel(
     val scrimProgress = remember { Animatable(0f) }
     val contentVisible = recognitionEnabled != null && (recognitionEnabled || entranceComplete)
     val contentReady by rememberUpdatedState(onContentReady)
-    val textEntryOffsetPx = with(density) { if (recognitionEnabled == false) 12.dp.toPx() else 0f }
-    val exitAlpha by animateFloatAsState(
-        targetValue = if (exitRequested) 0f else 1f,
-        animationSpec = tween(220, easing = FastOutSlowInEasing),
+    val entryOffsetPx = with(density) { (if (recognitionEnabled == false) 18.dp else 14.dp).toPx() }
+    val exitOffsetPx = with(density) { (if (handoffRunning) (-18).dp else 22.dp).toPx() }
+
+    val exitProgress by animateFloatAsState(
+        targetValue = if (exitRequested) 1f else 0f,
+        animationSpec = tween(210, easing = CouiExitEasing),
         label = "assistant_exit",
     )
-    val backdropAlpha by animateFloatAsState(
-        targetValue = if (contentVisible && !speech.active && state.messages.isEmpty()) 1f else 0f,
+    val hasMessages = state.messages.isNotEmpty()
+    val sheetScrimMix by animateFloatAsState(
+        targetValue = if (hasMessages) 1f else 0f,
+        animationSpec = tween(240, easing = LinearOutSlowInEasing),
+        label = "assistant_sheet_scrim_mix",
+    )
+    val voiceCushionAlpha by animateFloatAsState(
+        targetValue = if (contentVisible && speech.active && !hasMessages) 1f else 0f,
+        animationSpec = tween(220, easing = FastOutSlowInEasing),
+        label = "assistant_voice_cushion",
+    )
+    val textCushionAlpha by animateFloatAsState(
+        targetValue = if (contentVisible && !speech.active && !hasMessages) 1f else 0f,
         animationSpec = tween(200, easing = FastOutSlowInEasing),
-        label = "assistant_bottom_backdrop",
+        label = "assistant_text_cushion",
     )
     val imeInsets = WindowInsets.ime
     val navigationInsets = WindowInsets.navigationBars
 
     LaunchedEffect(Unit) {
-        delay(80)
-        scrimProgress.animateTo(1f, tween(220, easing = LinearOutSlowInEasing))
+        delay(50)
+        scrimProgress.animateTo(1f, tween(240, easing = LinearOutSlowInEasing))
     }
 
     LaunchedEffect(contentVisible) {
         if (!contentVisible) return@LaunchedEffect
-        val enterEasing = CubicBezierEasing(0.22f, 1f, 0.36f, 1f)
         coroutineScope {
             launch {
                 entryAlpha.animateTo(
@@ -222,8 +188,8 @@ internal fun EtaVoicePanel(
                 entryProgress.animateTo(
                     1f,
                     tween(
-                        durationMillis = if (recognitionEnabled == false) 240 else 200,
-                        easing = enterEasing,
+                        durationMillis = if (recognitionEnabled == false) 250 else 210,
+                        easing = CouiEnterEasing,
                     ),
                 )
             }
@@ -232,29 +198,51 @@ internal fun EtaVoicePanel(
         contentReady()
     }
 
+    val exitFade = 1f - exitProgress
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .graphicsLayer { alpha = exitAlpha }
             .drawBehind {
-                drawRect(colors.scrim.copy(alpha = colors.scrim.alpha * scrimProgress.value))
-                val backdrop = scrimProgress.value * backdropAlpha
-                if (backdrop > 0f) {
-                    val bottomInsetPx = maxOf(
-                        imeInsets.getBottom(this),
-                        navigationInsets.getBottom(this),
-                    ).toFloat()
-                    // 渐变顶边随软键盘同步上移，覆盖建议胶囊与输入栏区域，隔离底层页面文字干扰。
-                    val contentBandPx = 188.dp.toPx()
-                    val startY = (size.height - bottomInsetPx - contentBandPx).coerceAtLeast(0f)
-                    val solidY = (size.height - bottomInsetPx - 84.dp.toPx()).coerceIn(startY + 1f, size.height)
-                    val solidStop = ((solidY - startY) / (size.height - startY).coerceAtLeast(1f)).coerceIn(0.25f, 0.85f)
+                val baseScrim = lerp(colors.idleScrim, colors.sheetScrim, sheetScrimMix)
+                val scrimAlpha = baseScrim.alpha * scrimProgress.value * exitFade
+                if (scrimAlpha > 0.002f) {
+                    drawRect(baseScrim.copy(alpha = scrimAlpha))
+                }
+
+                val bottomInsetPx = maxOf(
+                    imeInsets.getBottom(this),
+                    navigationInsets.getBottom(this),
+                ).toFloat()
+
+                val voiceCushion = scrimProgress.value * voiceCushionAlpha * exitFade
+                if (voiceCushion > 0.005f) {
+                    val bandPx = 228.dp.toPx()
+                    val startY = (size.height - bottomInsetPx - bandPx).coerceAtLeast(0f)
+                    val baseAlpha = colors.voiceBottomCushion.alpha * voiceCushion
                     drawRect(
                         brush = Brush.verticalGradient(
                             0f to Color.Transparent,
-                            solidStop * 0.55f to colors.bottomBackdrop.copy(alpha = colors.bottomBackdrop.alpha * 0.68f * backdrop),
-                            solidStop to colors.bottomBackdrop.copy(alpha = colors.bottomBackdrop.alpha * backdrop),
-                            1f to colors.bottomBackdrop.copy(alpha = colors.bottomBackdrop.alpha * backdrop),
+                            0.36f to colors.voiceBottomCushion.copy(alpha = baseAlpha * 0.22f),
+                            0.70f to colors.voiceBottomCushion.copy(alpha = baseAlpha * 0.64f),
+                            1f to colors.voiceBottomCushion.copy(alpha = baseAlpha),
+                            startY = startY,
+                            endY = size.height,
+                        ),
+                        topLeft = Offset(0f, startY),
+                        size = Size(size.width, size.height - startY),
+                    )
+                }
+
+                val textCushion = scrimProgress.value * textCushionAlpha * exitFade
+                if (textCushion > 0.005f) {
+                    // 仅在输入胶囊与软键盘交界处铺一层柔和羽化托底，避免大面积灰雾截断壁纸。
+                    val bandPx = 136.dp.toPx()
+                    val startY = (size.height - bottomInsetPx - bandPx).coerceAtLeast(0f)
+                    drawRect(
+                        brush = Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            0.58f to colors.textBottomCushion.copy(alpha = colors.textBottomCushion.alpha * 0.50f * textCushion),
+                            1f to colors.textBottomCushion.copy(alpha = colors.textBottomCushion.alpha * textCushion),
                             startY = startY,
                             endY = size.height,
                         ),
@@ -277,6 +265,7 @@ internal fun EtaVoicePanel(
         EtaAssistantEdgeGlow(
             active = (speech.active || !entranceComplete) && !exitRequested,
             onEntranceFinished = onEntranceFinished,
+            level = speechLevel,
         )
         EtaAssistantWave(
             active = (speech.active || !entranceComplete) && !exitRequested,
@@ -288,8 +277,8 @@ internal fun EtaVoicePanel(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
-                    alpha = entryAlpha.value
-                    translationY = (1f - entryProgress.value) * textEntryOffsetPx
+                    alpha = entryAlpha.value * exitFade
+                    translationY = (1f - entryProgress.value) * entryOffsetPx + exitProgress * exitOffsetPx
                 },
         ) {
             val keyboardVisible by remember(density, imeInsets, navigationInsets) {
@@ -306,6 +295,7 @@ internal fun EtaVoicePanel(
                 state = state,
                 input = input,
                 speech = speech,
+                speechLevel = speechLevel,
                 recognitionEnabled = recognitionEnabled == true,
                 inputFocusRequestKey = inputFocusRequestKey,
                 onInputFocus = onInputFocus,
@@ -324,7 +314,7 @@ internal fun EtaVoicePanel(
                 ),
                 maxContentHeightPx = maxContentHeightPx,
                 imeOverlapPx = imeOverlap,
-                onInputChange = onInputChange,
+                onInputEdited = onInputEdited,
                 onSuggestionClick = { suggestion ->
                     keyboard?.hide()
                     onSuggestionClick(suggestion)
@@ -345,8 +335,9 @@ internal fun EtaVoicePanel(
 @Composable
 private fun BoxScope.AssistantPanel(
     state: EtaVoiceUiState,
-    input: String,
+    input: TextFieldState,
     speech: EtaSpeechState,
+    speechLevel: () -> Float,
     recognitionEnabled: Boolean,
     inputFocusRequestKey: Int,
     onInputFocus: () -> Unit,
@@ -361,7 +352,7 @@ private fun BoxScope.AssistantPanel(
     baseContentHeightPx: Float,
     maxContentHeightPx: Float,
     imeOverlapPx: Int,
-    onInputChange: (String) -> Unit,
+    onInputEdited: () -> Unit,
     onSuggestionClick: (String) -> Unit,
     keyboardVisible: Boolean,
     onSubmit: () -> Unit,
@@ -373,7 +364,12 @@ private fun BoxScope.AssistantPanel(
     val haptic = LocalHapticFeedback.current
     val listState = rememberLazyListState()
     var settledHeightPx by remember { mutableFloatStateOf(baseContentHeightPx) }
-    var draggedHeightPx by remember { mutableStateOf<Float?>(null) }
+    val heightAnim = remember { Animatable(0f) }
+    var sheetHeightPx by remember { mutableFloatStateOf(0f) }
+    var needsHeightAnimSync by remember { mutableStateOf(false) }
+    val rubberAnim = remember { Animatable(0f) }
+    var rubberYPx by remember { mutableFloatStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
     var autoExpandSuppressed by remember { mutableStateOf(false) }
     var dismissPullPx by remember { mutableFloatStateOf(0f) }
     var handoffPullPx by remember { mutableFloatStateOf(0f) }
@@ -382,81 +378,117 @@ private fun BoxScope.AssistantPanel(
     // 满高时把手与状态栏之间的空间有限，需在扣除触摸 slop 后仍能完成过顶手势。
     val handoffThresholdPx = with(density) { 24.dp.toPx() }
     val dismissThresholdPx = with(density) { 92.dp.toPx() }
+    val maxHandoffVisualPx = with(density) { 40.dp.toPx() }
     val autoSettleTolerancePx = with(density) { 6.dp.toPx() }
-    val minimumContentHeightPx = with(density) { 140.dp.toPx() }.coerceAtMost(maxContentHeightPx)
     val dragHandleHeightPx = with(density) { 38.dp.toPx() }
     val contentFitSlackPx = with(density) { 12.dp.toPx() }
-    val mediumHeightPx = baseContentHeightPx +
-        (maxContentHeightPx - baseContentHeightPx) * 0.58f
+    val availableMaxHeightPx = (maxContentHeightPx - imeOverlapPx).coerceAtLeast(0f)
+    val minimumContentHeightPx = with(density) { 140.dp.toPx() }.coerceAtMost(availableMaxHeightPx)
+    val clampedBaseHeightPx = baseContentHeightPx.coerceIn(minimumContentHeightPx, availableMaxHeightPx)
+    val mediumHeightPx = clampedBaseHeightPx +
+        (availableMaxHeightPx - clampedBaseHeightPx) * 0.58f
+    val effectiveMinHeightPx = minOf(clampedBaseHeightPx, settledHeightPx)
+        .coerceIn(minimumContentHeightPx, availableMaxHeightPx)
     val hasMessages = state.messages.isNotEmpty()
     val targetHeightPx = if (hasMessages) {
-        if (settledHeightPx <= 0f) baseContentHeightPx
-        else settledHeightPx.coerceIn(minimumContentHeightPx, maxContentHeightPx)
+        if (settledHeightPx <= 0f) clampedBaseHeightPx
+        else settledHeightPx.coerceIn(minimumContentHeightPx, availableMaxHeightPx)
     } else {
         0f
     }
-    val animatedHeightPx by animateFloatAsState(
-        targetValue = targetHeightPx,
-        animationSpec = when {
-            autoExpandSuppressed -> folmeSpring(damping = 1f, response = 0.38f)
-            else -> folmeSpring(damping = 1f, response = 0.46f)
-        },
-        label = "assistant_content_height",
-    )
     val sheetBackgroundAlpha = animateFloatAsState(
         targetValue = if (hasMessages) 1f else 0f,
-        animationSpec = tween(durationMillis = 160, easing = LinearOutSlowInEasing),
+        animationSpec = tween(durationMillis = 190, easing = LinearOutSlowInEasing),
         label = "assistant_sheet_background",
     )
     val messageRevealProgress = animateFloatAsState(
         targetValue = if (hasMessages) 1f else 0f,
         animationSpec = if (hasMessages) {
-            tween(durationMillis = 180, delayMillis = 50, easing = LinearOutSlowInEasing)
+            tween(durationMillis = 210, delayMillis = 45, easing = CouiEnterEasing)
         } else {
-            tween(durationMillis = 100, easing = FastOutSlowInEasing)
+            tween(durationMillis = 110, easing = FastOutSlowInEasing)
         },
         label = "assistant_message_reveal",
     )
-    val currentAnimatedHeight = rememberUpdatedState(animatedHeightPx)
-    val sheetHeightPx = draggedHeightPx ?: animatedHeightPx
-    val visibleSheetHeightPx = (sheetHeightPx - imeOverlapPx * 0.42f)
-        .coerceAtLeast(if (hasMessages) with(density) { 140.dp.toPx() }.coerceAtMost(sheetHeightPx) else 0f)
-        .coerceAtMost(
-            (maxContentHeightPx - imeOverlapPx).coerceAtLeast(0f),
-        )
-    val nearFullscreen = sheetHeightPx >= maxContentHeightPx * 0.88f
+    val visibleSheetHeightPx = if (hasMessages || sheetHeightPx > 0.5f) {
+        sheetHeightPx.coerceIn(0f, availableMaxHeightPx)
+    } else {
+        0f
+    }
     // 接管只认把手发起的过顶拉取：列表滚动与惯性 fling 不再触发，避免读回复时误入本体。
-    val handoffReady = canOpenConversation && nearFullscreen && handoffPullPx >= handoffThresholdPx
-    // 过顶拉取的橡皮筋位移要肉眼可见，用户才知道继续拉会进入本体。
-    val sheetTranslationPx = dismissPullPx * 0.28f - (handoffPullPx * 0.36f)
-        .coerceAtMost(with(density) { 40.dp.toPx() })
+    val handoffReady = canOpenConversation &&
+        sheetHeightPx >= availableMaxHeightPx - 1f &&
+        handoffPullPx >= handoffThresholdPx
+    val handoffPullProgress = if (canOpenConversation && handoffThresholdPx > 0f && handoffPullPx > 0f) {
+        (handoffPullPx / handoffThresholdPx).coerceIn(0f, 1f)
+    } else {
+        0f
+    }
 
     LaunchedEffect(hasMessages, minimumContentHeightPx, maxContentHeightPx) {
-        settledHeightPx = if (hasMessages) {
-            if (settledHeightPx <= 0f) baseContentHeightPx
-            else settledHeightPx.coerceIn(minimumContentHeightPx, maxContentHeightPx)
+        if (hasMessages) {
+            settledHeightPx = if (settledHeightPx <= 0f) {
+                baseContentHeightPx.coerceIn(minimumContentHeightPx, maxContentHeightPx)
+            } else {
+                settledHeightPx.coerceIn(minimumContentHeightPx, maxContentHeightPx)
+            }
         } else {
             autoExpandSuppressed = false
-            0f
+            isDragging = false
+            needsHeightAnimSync = false
+            dismissPullPx = 0f
+            handoffPullPx = 0f
+            settledHeightPx = 0f
+            rubberYPx = 0f
+            rubberAnim.snapTo(0f)
+        }
+    }
+    LaunchedEffect(targetHeightPx, isDragging) {
+        if (isDragging) return@LaunchedEffect
+        if (needsHeightAnimSync) {
+            heightAnim.snapTo(sheetHeightPx)
+            needsHeightAnimSync = false
+        }
+        heightAnim.animateTo(
+            targetValue = targetHeightPx,
+            animationSpec = if (autoExpandSuppressed) {
+                folmeSpring(damping = 1f, response = 0.36f)
+            } else {
+                folmeSpring(damping = 1f, response = 0.44f)
+            },
+        ) {
+            if (!isDragging) sheetHeightPx = value
+        }
+    }
+    LaunchedEffect(isDragging) {
+        if (isDragging) return@LaunchedEffect
+        if (abs(rubberYPx) > 0.5f) {
+            rubberAnim.snapTo(rubberYPx)
+            rubberAnim.animateTo(0f, folmeSpring(damping = 0.94f, response = 0.30f)) {
+                if (!isDragging) rubberYPx = value
+            }
+        } else {
+            rubberYPx = 0f
+            rubberAnim.snapTo(0f)
         }
     }
     // 单向连续生长：随实测内容高度平滑推高面板（弹簧保持速度连续），只增不减，
     // 避免分档等待造成的顿挫以及流式结束后的二次弹起与回落。
-    LaunchedEffect(hasMessages, keyboardVisible, baseContentHeightPx, maxContentHeightPx, listState) {
+    LaunchedEffect(hasMessages, keyboardVisible, baseContentHeightPx, availableMaxHeightPx, listState) {
         if (!hasMessages || keyboardVisible) return@LaunchedEffect
         snapshotFlow {
-            if (autoExpandSuppressed || draggedHeightPx != null || handoffRunning || !keepBottomAnchored) {
+            if (autoExpandSuppressed || isDragging || handoffRunning || !keepBottomAnchored) {
                 return@snapshotFlow null
             }
             requiredPanelHeightPx(
                 listState = listState,
-                currentAnimatedHeightPx = currentAnimatedHeight.value,
+                currentAnimatedHeightPx = sheetHeightPx,
                 settledHeightPx = settledHeightPx,
                 dragHandleHeightPx = dragHandleHeightPx,
                 contentFitSlackPx = contentFitSlackPx,
                 autoSettleTolerancePx = autoSettleTolerancePx,
-                baseContentHeightPx = baseContentHeightPx,
-                maxContentHeightPx = maxContentHeightPx,
+                baseContentHeightPx = clampedBaseHeightPx,
+                maxContentHeightPx = availableMaxHeightPx,
             )
         }
             .distinctUntilChanged()
@@ -478,200 +510,230 @@ private fun BoxScope.AssistantPanel(
 
     fun triggerHandoff() {
         if (handoffRunning || !canOpenConversation) return
-        settledHeightPx = maxContentHeightPx
-        draggedHeightPx = null
+        settledHeightPx = availableMaxHeightPx
         dismissPullPx = 0f
         handoffPullPx = 0f
+        rubberYPx = 0f
+        isDragging = false
         onOpenConversation()
     }
 
     fun stopAutoExpand() {
         if (autoExpandSuppressed) return
         autoExpandSuppressed = true
-        if (settledHeightPx > currentAnimatedHeight.value + autoSettleTolerancePx) {
-            settledHeightPx = currentAnimatedHeight.value.coerceIn(minimumContentHeightPx, maxContentHeightPx)
+        if (settledHeightPx > sheetHeightPx + autoSettleTolerancePx) {
+            settledHeightPx = sheetHeightPx.coerceIn(minimumContentHeightPx, availableMaxHeightPx)
         }
     }
 
-    fun dragBy(deltaY: Float, allowHandoff: Boolean = false): Float {
-        if (handoffRunning || state.messages.isEmpty()) return 0f
-        val current = draggedHeightPx ?: currentAnimatedHeight.value
-        val requested = current + handoffPullPx - dismissPullPx - deltaY
-        val minimumDragHeightPx = minOf(baseContentHeightPx, settledHeightPx)
-        return when {
-            requested > maxContentHeightPx -> {
-                draggedHeightPx = maxContentHeightPx
-                dismissPullPx = 0f
-                handoffPullPx = if (allowHandoff) requested - maxContentHeightPx else 0f
-                if (allowHandoff) deltaY else current - maxContentHeightPx
-            }
-            requested < minimumDragHeightPx -> {
-                draggedHeightPx = minimumDragHeightPx
-                dismissPullPx = minimumDragHeightPx - requested
-                handoffPullPx = 0f
-                deltaY
-            }
-            else -> {
-                draggedHeightPx = requested
-                dismissPullPx = 0f
-                handoffPullPx = 0f
-                deltaY
-            }
-        }
-    }
-
-    fun finishDrag(commit: Boolean = true, allowHandoff: Boolean = false) {
-        if (handoffRunning) return
-        val current = draggedHeightPx ?: currentAnimatedHeight.value
-        when {
-            commit && dismissPullPx >= dismissThresholdPx -> onClose()
-            // 松手可能与最后一个位移在同一帧内到达，直接读取状态，不依赖重组后的派生值。
-            commit && allowHandoff && canOpenConversation &&
-                current >= maxContentHeightPx && handoffPullPx >= handoffThresholdPx -> triggerHandoff()
-            else -> {
-                val anchors = floatArrayOf(
-                    minOf(baseContentHeightPx, settledHeightPx),
-                    baseContentHeightPx,
-                    mediumHeightPx,
-                    maxContentHeightPx,
-                )
-                settledHeightPx = anchors.minBy { kotlin.math.abs(it - current) }
-                draggedHeightPx = null
-                dismissPullPx = 0f
-                handoffPullPx = 0f
-            }
-        }
-    }
-
-    // 局部函数引用的相等判断不包含捕获值，不能直接作为结构相等 State 的回调值。
-    val stopAutoExpandState = rememberUpdatedState { stopAutoExpand() }
-    val startDragState = rememberUpdatedState {
+    fun startDrag() {
         stopAutoExpand()
+        isDragging = true
+        needsHeightAnimSync = true
         dismissPullPx = 0f
         handoffPullPx = 0f
-        draggedHeightPx = currentAnimatedHeight.value
+        sheetHeightPx = sheetHeightPx.coerceIn(effectiveMinHeightPx, availableMaxHeightPx)
+        rubberYPx = 0f
     }
+
+    fun dragBy(deltaRootY: Float, allowHandoff: Boolean) {
+        if (handoffRunning || state.messages.isEmpty() || deltaRootY == 0f) return
+        val currentPos = sheetHeightPx + handoffPullPx - dismissPullPx
+        val requestedPos = currentPos - deltaRootY
+        val clampedHeight = requestedPos.coerceIn(effectiveMinHeightPx, availableMaxHeightPx)
+        val nextHandoff = if (allowHandoff && requestedPos > availableMaxHeightPx) {
+            requestedPos - availableMaxHeightPx
+        } else {
+            0f
+        }
+        val nextDismiss = if (requestedPos < effectiveMinHeightPx) {
+            effectiveMinHeightPx - requestedPos
+        } else {
+            0f
+        }
+        handoffPullPx = nextHandoff
+        dismissPullPx = nextDismiss
+        sheetHeightPx = clampedHeight
+        rubberYPx = nextDismiss * 0.28f - (nextHandoff * 0.36f).coerceAtMost(maxHandoffVisualPx)
+    }
+
+    fun finishDrag(commit: Boolean, allowHandoff: Boolean) {
+        if (handoffRunning) {
+            isDragging = false
+            return
+        }
+        val current = sheetHeightPx
+        when {
+            commit && dismissPullPx >= dismissThresholdPx -> {
+                dismissPullPx = 0f
+                handoffPullPx = 0f
+                isDragging = false
+                onClose()
+            }
+            // 松手可能与最后一个位移在同一帧内到达，直接读取状态，不依赖重组后的派生值。
+            commit && allowHandoff && canOpenConversation &&
+                current >= availableMaxHeightPx - 1f && handoffPullPx >= handoffThresholdPx -> {
+                triggerHandoff()
+            }
+            else -> {
+                val anchors = floatArrayOf(
+                    effectiveMinHeightPx,
+                    clampedBaseHeightPx,
+                    mediumHeightPx,
+                    availableMaxHeightPx,
+                )
+                settledHeightPx = anchors.minBy { abs(it - current) }
+                dismissPullPx = 0f
+                handoffPullPx = 0f
+                isDragging = false
+            }
+        }
+    }
+
+    val startDragState = rememberUpdatedState { startDrag() }
     val dragByState = rememberUpdatedState { deltaY: Float, allowHandoff: Boolean ->
         dragBy(deltaY, allowHandoff)
     }
     val finishDragState = rememberUpdatedState { commit: Boolean, allowHandoff: Boolean ->
         finishDrag(commit, allowHandoff)
     }
-    val nestedScrollConnection = remember(
-        baseContentHeightPx,
-        maxContentHeightPx,
-        canOpenConversation,
-        listState,
-    ) {
-        object : NestedScrollConnection {
-            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
-                if (source != NestedScrollSource.UserInput) return Offset.Zero
-                stopAutoExpandState.value()
-                val current = draggedHeightPx ?: currentAnimatedHeight.value
-                val shouldResize = (available.y < 0f && current < maxContentHeightPx) ||
-                    (available.y > 0f && current > minOf(baseContentHeightPx, settledHeightPx) &&
-                        !listState.canScrollBackward)
-                return if (shouldResize) {
-                    Offset(0f, dragByState.value(available.y, false))
-                } else {
-                    Offset.Zero
-                }
-            }
-
-            override fun onPostScroll(
-                consumed: Offset,
-                available: Offset,
-                source: NestedScrollSource,
-            ): Offset {
-                if (source != NestedScrollSource.UserInput || available.y == 0f) return Offset.Zero
-                stopAutoExpandState.value()
-                val current = draggedHeightPx ?: currentAnimatedHeight.value
-                val atLowerEdge = available.y > 0f && current <= minOf(baseContentHeightPx, settledHeightPx)
-                return if (atLowerEdge) {
-                    Offset(0f, dragByState.value(available.y, false))
-                } else {
-                    Offset.Zero
-                }
-            }
-
-            override suspend fun onPreFling(available: Velocity): Velocity {
-                stopAutoExpandState.value()
-                finishDragState.value(true, false)
-                return Velocity.Zero
-            }
-
-            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
-                stopAutoExpandState.value()
-                finishDragState.value(true, false)
-                return Velocity.Zero
-            }
-        }
+    val shouldInterceptListDrag = rememberUpdatedState { totalDy: Float ->
+        (totalDy < 0f && sheetHeightPx < availableMaxHeightPx - 1f) ||
+            (totalDy > 0f && !listState.canScrollBackward)
     }
 
-    val messageRevealOffsetPx = with(density) { 12.dp.toPx() }
-    val sheetShape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp)
+    val messageRevealOffsetPx = with(density) { 14.dp.toPx() }
+    val sheetCornerRadius = 32.dp
+    val sheetShape = remember { TopCouiSheetShape(topRadius = sheetCornerRadius, cornerWeight = 2.6f) }
+    val sheetSurfaceVisible = hasMessages || sheetBackgroundAlpha.value > 0.001f
+
     Column(
         modifier = Modifier
             .align(Alignment.BottomCenter)
             .fillMaxWidth()
-            // IME 已由系统逐帧插值；布局阶段直接消费，避免组合阶段旧值或二次动画造成追赶。
-            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom))
-            .offset(y = with(density) { sheetTranslationPx.toDp() })
-            .clip(sheetShape)
+            .offset { IntOffset(0, rubberYPx.roundToInt()) }
             .drawBehind {
-                drawRect(
-                    colors.content.copy(
-                        alpha = colors.content.alpha * sheetBackgroundAlpha.value,
-                    ),
-                )
+                val sheetAlpha = sheetBackgroundAlpha.value
+                if (sheetAlpha > 0.01f && size.height > 8f) {
+                    // 沿着 G2 连续顶部圆角外侧绘制渐隐环境投影，切出面板内部后贴合左右切点收束至 0，
+                    // 避免矩形阴影在圆角外侧露馅。
+                    val shadowRisePx = 28.dp.toPx()
+                    val cornerPx = sheetCornerRadius.toPx().coerceIn(0f, minOf(size.width * 0.5f, size.height))
+                    val maxAlpha = (if (colors.dark) 0.30f else 0.10f) * sheetAlpha
+                    val sheetPath = buildTopCouiSheetPath(size, cornerPx, 2.6f)
+                    val rimPath = buildTopCouiRimPath(size, cornerPx, 2.6f)
+                    clipRect(left = 0f, top = -shadowRisePx, right = size.width, bottom = cornerPx) {
+                        clipPath(sheetPath, clipOp = ClipOp.Difference) {
+                            val layers = 8
+                            for (i in 0 until layers) {
+                                val fraction = (i + 1f) / layers
+                                val spread = shadowRisePx * fraction
+                                val falloff = 1f - i.toFloat() / layers
+                                val layerAlpha = maxAlpha * falloff * falloff * (2.2f / layers)
+                                if (layerAlpha > 0.001f) {
+                                    drawPath(
+                                        path = rimPath,
+                                        color = Color.Black.copy(alpha = layerAlpha),
+                                        style = Stroke(width = spread * 2f, cap = StrokeCap.Butt),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            .border(
-                width = 1.6.dp,
-                color = colors.panelStroke.copy(alpha = colors.panelStroke.alpha * sheetBackgroundAlpha.value),
-                shape = sheetShape,
+            // 未展开回复面板时不启用面板轮廓裁剪，避免把空状态下的悬浮胶囊顶部与阴影裁掉。
+            .then(if (sheetSurfaceVisible) Modifier.clip(sheetShape) else Modifier)
+            .drawWithContent {
+                val sheetAlpha = sheetBackgroundAlpha.value
+                if (sheetAlpha > 0f) {
+                    drawRect(
+                        colors.content.copy(
+                            alpha = colors.content.alpha * sheetAlpha,
+                        ),
+                    )
+                }
+                drawContent()
+                if (sheetAlpha > 0.01f && size.height > 8f) {
+                    val rimFadePx = minOf(84.dp.toPx(), size.height * 0.55f)
+                    val path = buildTopCouiSheetPath(size, sheetCornerRadius.toPx(), 2.6f)
+                    drawPath(
+                        path = path,
+                        brush = Brush.verticalGradient(
+                            0f to colors.panelSpecular.copy(alpha = colors.panelSpecular.alpha * sheetAlpha),
+                            1f to Color.Transparent,
+                            startY = 0f,
+                            endY = rimFadePx.coerceAtLeast(1f),
+                        ),
+                        style = Stroke(width = 1.15.dp.toPx()),
+                    )
+                }
+            }
+            // 背景先覆盖导航区域，再让内容避开系统栏；否则底部 Insets 会露出下层窗口。
+            // IME 与导航栏取并集，布局阶段消费一次，跟随系统键盘动画。
+            .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars).only(WindowInsetsSides.Bottom))
+            .windowInsetsPadding(
+                WindowInsets.navigationBars.union(WindowInsets.displayCutout).only(WindowInsetsSides.Horizontal),
             ),
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(with(density) { visibleSheetHeightPx.toDp() })
-                .nestedScroll(nestedScrollConnection),
-        ) {
-            DragHandle(
-                colors = colors,
-                handoffReady = handoffReady,
-                modifier = Modifier.pointerInput(baseContentHeightPx, maxContentHeightPx) {
-                    // 回复完成会改变接管资格；更新回调而不重启正在进行的手势。
-                    detectVerticalDragGestures(
-                        onDragStart = { startDragState.value() },
-                        onVerticalDrag = { change, dragAmount ->
-                            change.consume()
-                            dragByState.value(dragAmount, true)
-                        },
-                        onDragEnd = { finishDragState.value(true, true) },
-                        onDragCancel = { finishDragState.value(false, false) },
-                    )
-                },
-            )
-            Box(
+        if (sheetSurfaceVisible) {
+            Column(
                 modifier = Modifier
-                    .weight(1f)
-                    .graphicsLayer {
-                        alpha = messageRevealProgress.value
-                        translationY = (1f - messageRevealProgress.value) * messageRevealOffsetPx
-                    },
+                    .fillMaxWidth()
+                    .height(with(density) { visibleSheetHeightPx.toDp() }),
             ) {
-                if (hasMessages) {
-                    AgentConversationMessages(
-                        visibleMessages = state.messages,
-                        scrollState = listState,
-                        isStreaming = state.phase == EtaVoicePhase.PROCESSING,
-                        bottomInset = 8.dp,
-                        keepBottomAnchored = keepBottomAnchored,
-                        onBottomAnchorChanged = { keepBottomAnchored = it },
-                        assistantOverlay = true,
-                        modifier = Modifier.fillMaxSize(),
-                    )
+                var handleCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+                DragHandle(
+                    colors = colors,
+                    handoffReady = handoffReady,
+                    handoffProgress = handoffPullProgress,
+                    modifier = Modifier
+                        .onGloballyPositioned { handleCoords = it }
+                        .pointerInput(Unit) {
+                            handleRootVerticalDrag(
+                                getCoords = { handleCoords },
+                                pass = PointerEventPass.Main,
+                                shouldStart = { true },
+                                onDragStart = { startDragState.value() },
+                                onDrag = { deltaRootY -> dragByState.value(deltaRootY, true) },
+                                onDragEnd = { finishDragState.value(true, true) },
+                                onDragCancel = { finishDragState.value(false, false) },
+                            )
+                        },
+                )
+                var listBoxCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .onGloballyPositioned { listBoxCoords = it }
+                        .pointerInput(Unit) {
+                            handleRootVerticalDrag(
+                                getCoords = { listBoxCoords },
+                                pass = PointerEventPass.Initial,
+                                shouldStart = { totalRootY -> shouldInterceptListDrag.value(totalRootY) },
+                                onDragStart = { startDragState.value() },
+                                onDrag = { deltaRootY -> dragByState.value(deltaRootY, false) },
+                                onDragEnd = { finishDragState.value(true, false) },
+                                onDragCancel = { finishDragState.value(false, false) },
+                            )
+                        }
+                        .graphicsLayer {
+                            alpha = messageRevealProgress.value
+                            translationY = (1f - messageRevealProgress.value) * messageRevealOffsetPx
+                        },
+                ) {
+                    if (hasMessages) {
+                        AgentConversationMessages(
+                            visibleMessages = state.messages,
+                            scrollState = listState,
+                            isStreaming = state.phase == EtaVoicePhase.PROCESSING,
+                            bottomInset = 8.dp,
+                            keepBottomAnchored = keepBottomAnchored,
+                            onBottomAnchorChanged = { keepBottomAnchored = it },
+                            assistantOverlay = true,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             }
         }
@@ -684,6 +746,7 @@ private fun BoxScope.AssistantPanel(
             state = state,
             input = input,
             speech = speech,
+            speechLevel = speechLevel,
             recognitionEnabled = recognitionEnabled,
             inputFocusRequestKey = inputFocusRequestKey,
             onInputFocus = onInputFocus,
@@ -694,7 +757,7 @@ private fun BoxScope.AssistantPanel(
             onKeyboard = onKeyboard,
             keyboardVisible = keyboardVisible,
             colors = colors,
-            onInputChange = onInputChange,
+            onInputEdited = onInputEdited,
             onSubmit = onSubmit,
             onStop = onStop,
             modifier = Modifier
@@ -702,43 +765,159 @@ private fun BoxScope.AssistantPanel(
                 .padding(
                     start = 18.dp,
                     end = 18.dp,
-                    top = 4.dp,
+                    top = 2.dp,
                     bottom = 14.dp,
                 ),
         )
     }
 }
 
+private suspend fun PointerInputScope.handleRootVerticalDrag(
+    getCoords: () -> LayoutCoordinates?,
+    pass: PointerEventPass,
+    shouldStart: (totalRootY: Float) -> Boolean,
+    onDragStart: () -> Unit,
+    onDrag: (deltaRootY: Float) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit,
+) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false, pass = pass)
+        var activeId = down.id
+        val startRoot = getCoords().toRootOffset(down.position)
+        var lastRootY = startRoot.y
+        val touchSlop = viewConfiguration.touchSlop
+        var started = false
+        var finished = false
+        try {
+            while (true) {
+                val event = awaitPointerEvent(pass)
+                val changes = event.changes
+                val activeChange = changes.firstOrNull { it.id == activeId }
+                if (activeChange == null) {
+                    if (started) onDragCancel()
+                    finished = true
+                    break
+                }
+                if (!activeChange.pressed) {
+                    val nextPointer = changes.firstOrNull { it.pressed }
+                    if (nextPointer != null) {
+                        activeId = nextPointer.id
+                        lastRootY = getCoords().toRootOffset(nextPointer.position).y
+                        if (started) nextPointer.consume()
+                        continue
+                    }
+                    if (started) {
+                        val releasedCleanly = activeChange.changedToUpIgnoreConsumed() &&
+                            (pass == PointerEventPass.Initial || !activeChange.isConsumed)
+                        if (releasedCleanly) {
+                            onDragEnd()
+                        } else {
+                            onDragCancel()
+                        }
+                    }
+                    finished = true
+                    break
+                }
+                if (pass == PointerEventPass.Main && activeChange.isConsumed) {
+                    if (started) onDragCancel()
+                    finished = true
+                    break
+                }
+                val currentRoot = getCoords().toRootOffset(activeChange.position)
+                if (!started) {
+                    val totalDx = currentRoot.x - startRoot.x
+                    val totalDy = currentRoot.y - startRoot.y
+                    if (abs(totalDx) > touchSlop && abs(totalDx) > abs(totalDy)) {
+                        finished = true
+                        break
+                    }
+                    if (abs(totalDy) > touchSlop && abs(totalDy) >= abs(totalDx)) {
+                        if (!shouldStart(totalDy)) {
+                            finished = true
+                            break
+                        }
+                        started = true
+                        onDragStart()
+                        val overSlop = totalDy - sign(totalDy) * touchSlop
+                        activeChange.consume()
+                        lastRootY = currentRoot.y
+                        if (overSlop != 0f) onDrag(overSlop)
+                    }
+                } else {
+                    val deltaRootY = currentRoot.y - lastRootY
+                    lastRootY = currentRoot.y
+                    activeChange.consume()
+                    if (deltaRootY != 0f) onDrag(deltaRootY)
+                }
+            }
+        } finally {
+            if (started && !finished) {
+                onDragCancel()
+            }
+        }
+    }
+}
+
+private fun LayoutCoordinates?.toRootOffset(localPosition: Offset): Offset {
+    val coords = this?.takeIf { it.isAttached } ?: return localPosition
+    return coords.localToRoot(localPosition)
+}
+
 @Composable
 private fun DragHandle(
     colors: EtaVoicePanelColors,
     handoffReady: Boolean,
+    handoffProgress: Float,
     modifier: Modifier = Modifier,
 ) {
-    // 把手是接管的唯一入口：拉到阈值时变宽并染成主色，配合触觉反馈提示松手进入本体。
+    // 把手是接管的唯一入口：拉到阈值时变宽并染成主色，配合微文案与触觉反馈提示松手进入本体。
     val handleWidth by animateDpAsState(
         targetValue = if (handoffReady) 52.dp else 36.dp,
-        animationSpec = tween(160),
+        animationSpec = folmeSpring(damping = 0.88f, response = 0.26f),
         label = "assistant_handle_width",
     )
     val handleColor by animateColorAsState(
-        targetValue = if (handoffReady) MiuixTheme.colorScheme.primary else colors.tertiary,
+        targetValue = if (handoffReady) colors.accent else colors.tertiary,
         animationSpec = tween(160),
         label = "assistant_handle_color",
+    )
+    val hintAlpha by animateFloatAsState(
+        targetValue = if (handoffProgress > 0.18f) 1f else 0f,
+        animationSpec = tween(140),
+        label = "assistant_handoff_hint_alpha",
     )
     Box(
         modifier = modifier
             .fillMaxWidth()
             .height(38.dp)
             .testTag("eta_assistant_drag_handle"),
-        contentAlignment = Alignment.Center,
     ) {
         Box(
             modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 15.dp)
+                .graphicsLayer { translationY = -7.dp.toPx() * hintAlpha }
                 .size(width = handleWidth, height = 4.dp)
                 .clip(CircleShape)
                 .background(handleColor),
         )
+        if (hintAlpha > 0.01f) {
+            Text(
+                text = stringResource(
+                    if (handoffReady) R.string.voice_handoff_release else R.string.voice_handoff_pull,
+                ),
+                color = if (handoffReady) colors.accent else colors.inputSecondary,
+                fontSize = 11.sp,
+                lineHeight = 14.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 3.dp)
+                    .graphicsLayer { alpha = hintAlpha },
+            )
+        }
     }
 }
 

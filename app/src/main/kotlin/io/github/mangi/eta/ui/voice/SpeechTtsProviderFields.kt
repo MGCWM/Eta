@@ -1,9 +1,7 @@
 package io.github.mangi.eta.ui.voice
 
-import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
-import com.itos.coui.layout.Divider
 import io.github.mangi.eta.R
 import io.github.mangi.eta.data.model.AppearanceUiStyle
 import io.github.mangi.eta.data.model.GeminiTtsModel
@@ -11,8 +9,13 @@ import io.github.mangi.eta.data.model.MiniMaxTtsModel
 import io.github.mangi.eta.data.model.SpeechCredentialField
 import io.github.mangi.eta.data.model.TtsProvider
 import io.github.mangi.eta.ui.app.LocalUiStyle
+import io.github.mangi.eta.ui.components.SettingsTextField
 import io.github.mangi.eta.ui.components.coui.CouiDropdownPreference
-import top.yukonga.miuix.kmp.preference.OverlayDropdownPreference
+import io.github.mangi.eta.ui.components.coui.CouiSwitchPreference
+import io.github.mangi.eta.ui.components.currentGlassOverlayBackdrop
+import io.github.mangi.eta.ui.components.coui.CouiCardDivider as CouiDivider
+import top.yukonga.miuix.kmp.glass.GlassDropdownPreference
+import top.yukonga.miuix.kmp.preference.SwitchPreference
 
 @Composable
 internal fun GeminiConnectionSection(store: SpeechSettingsStore) {
@@ -40,13 +43,14 @@ internal fun GeminiConnectionSection(store: SpeechSettingsStore) {
                         }
                     },
                 )
-                Divider()
+                CouiDivider()
             }
             AppearanceUiStyle.MIUIX -> {
-                OverlayDropdownPreference(
+                GlassDropdownPreference(
                     title = stringResource(R.string.speech_tts_model),
                     items = items,
                     selectedIndex = config.model.ordinal,
+                    backdrop = currentGlassOverlayBackdrop(),
                     onSelectedIndexChange = { index ->
                         GeminiTtsModel.entries.getOrNull(index)?.let {
                             store.edit(store.settings.copy(geminiTts = config.copy(model = it)))
@@ -84,13 +88,14 @@ internal fun MiniMaxConnectionSection(store: SpeechSettingsStore) {
                         }
                     },
                 )
-                Divider()
+                CouiDivider()
             }
             AppearanceUiStyle.MIUIX -> {
-                OverlayDropdownPreference(
+                GlassDropdownPreference(
                     title = stringResource(R.string.speech_tts_model),
                     items = items,
                     selectedIndex = config.model.ordinal,
+                    backdrop = currentGlassOverlayBackdrop(),
                     onSelectedIndexChange = { index ->
                         MiniMaxTtsModel.entries.getOrNull(index)?.let {
                             store.edit(store.settings.copy(minimaxTts = config.copy(model = it)))
@@ -103,37 +108,52 @@ internal fun MiniMaxConnectionSection(store: SpeechSettingsStore) {
 }
 
 @Composable
-private fun SpeechApiKeyConnectionSection(
-    baseUrl: String,
-    apiKey: String,
-    onBaseUrl: (String) -> Unit,
-    onApiKey: (String) -> Unit,
-    note: String,
-    model: @Composable () -> Unit,
-) {
-    Column {
-        SpeechGroupCard(title = stringResource(R.string.speech_group_connection)) {
-            model()
-            SpeechFieldColumn {
-                SpeechField("API Key", apiKey, secret = true, onChange = { onApiKey(it.trim()) })
-                SpeechField(stringResource(R.string.speech_base_url), baseUrl, onChange = { onBaseUrl(it.trim()) })
-            }
-        }
-        SpeechNote(note)
-    }
+internal fun MimoTtsConnectionSection(store: SpeechSettingsStore) {
+    val config = store.settings.mimoTts
+    SpeechApiKeyConnectionSection(
+        baseUrl = config.baseUrl,
+        apiKey = store.credentials.mimoTts,
+        onBaseUrl = { store.edit(store.settings.copy(mimoTts = config.copy(baseUrl = it))) },
+        onApiKey = { store.credential(SpeechCredentialField.MIMO_TTS, it) },
+        note = stringResource(R.string.speech_mimo_tts_connection_note),
+    )
+}
+
+@Composable
+internal fun DeepSeekTtsConnectionSection(store: SpeechSettingsStore) {
+    val config = store.settings.deepseekTts
+    SpeechApiKeyConnectionSection(
+        baseUrl = config.baseUrl,
+        apiKey = store.credentials.deepseekTts,
+        onBaseUrl = { store.edit(store.settings.copy(deepseekTts = config.copy(baseUrl = it))) },
+        onApiKey = { store.credential(SpeechCredentialField.DEEPSEEK_TTS, it) },
+        note = stringResource(
+            if (store.hasProviderDeepSeekKey) {
+                R.string.speech_deepseek_tts_connection_note_with_provider
+            } else {
+                R.string.speech_deepseek_tts_connection_note
+            },
+        ),
+    )
 }
 
 @Composable
 internal fun SpeechDeliveryFields(store: SpeechSettingsStore) {
     when (store.settings.tts) {
-        TtsProvider.GEMINI -> {
-            val config = store.settings.geminiTts
+        TtsProvider.GEMINI, TtsProvider.MIMO -> {
+            val settings = store.settings
+            val mimo = settings.tts == TtsProvider.MIMO
             SpeechFieldColumn {
-                SpeechField(
-                    label = stringResource(R.string.speech_gemini_style),
-                    value = config.style,
+                SettingsTextField(
+                    label = stringResource(R.string.speech_style),
+                    value = if (mimo) settings.mimoTts.style else settings.geminiTts.style,
                     singleLine = false,
-                    onChange = { store.edit(store.settings.copy(geminiTts = config.copy(style = it))) },
+                    onChange = {
+                        store.edit(
+                            if (mimo) settings.copy(mimoTts = settings.mimoTts.copy(style = it))
+                            else settings.copy(geminiTts = settings.geminiTts.copy(style = it)),
+                        )
+                    },
                 )
             }
         }
@@ -144,7 +164,7 @@ internal fun SpeechDeliveryFields(store: SpeechSettingsStore) {
             val items = speeds.map { "$it×" }
             when (LocalUiStyle.current) {
                 AppearanceUiStyle.COUI -> {
-                    Divider()
+                    CouiDivider()
                     CouiDropdownPreference(
                         title = stringResource(R.string.speech_speed),
                         items = items,
@@ -157,15 +177,39 @@ internal fun SpeechDeliveryFields(store: SpeechSettingsStore) {
                     )
                 }
                 AppearanceUiStyle.MIUIX -> {
-                    OverlayDropdownPreference(
+                    GlassDropdownPreference(
                         title = stringResource(R.string.speech_speed),
                         items = items,
                         selectedIndex = speeds.indexOf(config.speed),
+                        backdrop = currentGlassOverlayBackdrop(),
                         onSelectedIndexChange = { index ->
                             speeds.getOrNull(index)?.let {
                                 store.edit(store.settings.copy(minimaxTts = config.copy(speed = it)))
                             }
                         },
+                    )
+                }
+            }
+        }
+        TtsProvider.DEEPSEEK -> {
+            val config = store.settings.deepseekTts
+            val onToggle: (Boolean) -> Unit = { checked ->
+                store.edit(store.settings.copy(deepseekTts = config.copy(filterMarkdown = checked)))
+            }
+            when (LocalUiStyle.current) {
+                AppearanceUiStyle.COUI -> {
+                    CouiDivider()
+                    CouiSwitchPreference(
+                        title = stringResource(R.string.speech_filter_markdown),
+                        checked = config.filterMarkdown,
+                        onCheckedChange = onToggle,
+                    )
+                }
+                AppearanceUiStyle.MIUIX -> {
+                    SwitchPreference(
+                        title = stringResource(R.string.speech_filter_markdown),
+                        checked = config.filterMarkdown,
+                        onCheckedChange = onToggle,
                     )
                 }
             }

@@ -8,8 +8,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -20,20 +20,23 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.CircleShape as CouiCapsuleShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mangi.eta.R
+import io.github.mangi.eta.ui.components.coui.couiButtonFeedback
+import io.github.mangi.eta.ui.components.coui.couiPressMotion
+import io.github.mangi.eta.ui.components.coui.rememberCouiPressMotion
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 internal enum class EtaSpeechPhase { IDLE, STARTING, LISTENING, RECOGNIZING }
 
@@ -57,20 +60,18 @@ internal fun EtaSpeechFeedback(
     onOpenSpeechSettings: () -> Unit,
 ) {
     val message = speech.message ?: speech.errorRes?.let { stringResource(it) }
-    val dark = MiuixTheme.colorScheme.background.luminance() < 0.5f
-    val dotColor = if (speech.feedbackIsError) {
-        if (dark) Color(0xFFFF6B6B) else Color(0xFFE5484D)
-    } else {
-        MiuixTheme.colorScheme.primary
-    }
-    val actionTint = MiuixTheme.colorScheme.primary
-    val actionBackground = actionTint.copy(alpha = if (dark) 0.20f else 0.10f)
+    val dotColor = if (speech.feedbackIsError) colors.error else colors.accent
+    val actionTint = colors.accent
+    val actionBackground = actionTint.copy(alpha = if (colors.dark) 0.22f else 0.12f)
+    val rowSource = remember { MutableInteractionSource() }
+    val rowPress = rememberCouiPressMotion()
+    val buttonSource = remember { MutableInteractionSource() }
 
     AnimatedVisibility(
         visible = !message.isNullOrBlank(),
         enter = fadeIn(tween(180)) + expandVertically(
             expandFrom = Alignment.Bottom,
-            animationSpec = tween(200, easing = FastOutSlowInEasing),
+            animationSpec = tween(220, easing = FastOutSlowInEasing),
         ),
         exit = fadeOut(tween(120)) + shrinkVertically(
             shrinkTowards = Alignment.Bottom,
@@ -80,18 +81,30 @@ internal fun EtaSpeechFeedback(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(bottom = 10.dp),
+                .padding(top = 4.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
                 modifier = Modifier
-                    .heightIn(min = 36.dp)
-                    .clip(CircleShape)
-                    .background(colors.chipBackground)
-                    .border(0.75.dp, colors.chipStroke, CircleShape)
+                    .heightIn(min = 38.dp)
+                    .couiPressMotion(rowPress, enabled = speech.configureAvailable, cancelOnConsumedMove = true)
+                    .couiAssistantCapsule(
+                        surfaceColor = colors.chipBackground,
+                        strokeColor = colors.chipStroke,
+                        dark = colors.dark,
+                        elevation = AssistantCapsuleElevation.Chip,
+                        interactive = speech.configureAvailable,
+                        interactionSource = rowSource,
+                        pressMotion = if (speech.configureAvailable) rowPress else null,
+                    )
                     .then(
                         if (speech.configureAvailable) {
-                            Modifier.clickable(onClick = onOpenSpeechSettings)
+                            Modifier.clickable(
+                                interactionSource = rowSource,
+                                indication = null,
+                                role = Role.Button,
+                                onClick = onOpenSpeechSettings,
+                            )
                         } else {
                             Modifier
                         },
@@ -99,15 +112,15 @@ internal fun EtaSpeechFeedback(
                     .padding(
                         start = 14.dp,
                         end = if (speech.configureAvailable) 6.dp else 14.dp,
-                        top = 5.dp,
-                        bottom = 5.dp,
+                        top = 6.dp,
+                        bottom = 6.dp,
                     ),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Box(
                     modifier = Modifier
-                        .size(6.dp)
+                        .size(6.5.dp)
                         .clip(CircleShape)
                         .background(dotColor),
                 )
@@ -124,10 +137,16 @@ internal fun EtaSpeechFeedback(
                     Spacer(modifier = Modifier.width(2.dp))
                     Box(
                         modifier = Modifier
-                            .clip(CircleShape)
-                            .background(actionBackground)
-                            .clickable(onClick = onOpenSpeechSettings)
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                            .clip(CouiCapsuleShape)
+                            .background(actionBackground, CouiCapsuleShape)
+                            .couiButtonFeedback(colors.dark, buttonSource, enabled = true)
+                            .clickable(
+                                interactionSource = buttonSource,
+                                indication = null,
+                                role = Role.Button,
+                                onClick = onOpenSpeechSettings,
+                            )
+                            .padding(horizontal = 11.dp, vertical = 5.dp),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(

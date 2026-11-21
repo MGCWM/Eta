@@ -3,6 +3,7 @@ package io.github.mangi.eta.data.db
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import io.github.mangi.eta.data.model.McpDiscoveryTruncation
 import io.github.mangi.eta.data.model.McpServerSetting
 import io.github.mangi.eta.data.model.McpToolDefinition
 import kotlinx.serialization.builtins.ListSerializer
@@ -25,13 +26,14 @@ internal data class McpServerEntity(
     @ColumnInfo(name = "last_refreshed_at") val lastRefreshedAt: Long?,
     @ColumnInfo(name = "last_protocol_version") val lastProtocolVersion: String?,
     @ColumnInfo(name = "tools_expire_at") val toolsExpireAt: Long?,
-    @ColumnInfo(name = "transport", defaultValue = "'http'") val transport: String = "http",
-    @ColumnInfo(name = "command", defaultValue = "''") val command: String = "",
-    @ColumnInfo(name = "args_json", defaultValue = "'[]'") val argsJson: String = "[]",
-    @ColumnInfo(name = "environment_json", defaultValue = "'[]'") val environmentJson: String = "[]",
-    @ColumnInfo(name = "headers_json", defaultValue = "'[]'") val headersJson: String = "[]",
-    @ColumnInfo(name = "startup_timeout_ms", defaultValue = "60000") val startupTimeoutMs: Long = 60_000L,
-    @ColumnInfo(name = "request_timeout_ms", defaultValue = "120000") val requestTimeoutMs: Long = 120_000L,
+    @ColumnInfo(name = "tools_truncation_reason") val toolsTruncationReason: String? = null,
+    // ---- STDIO 传输列，迁移 30→31 添加，默认值与 HTTP 行为一致 ----
+    val transport: String = "http",
+    val command: String = "",
+    @ColumnInfo(name = "args_json") val argsJson: String = "[]",
+    @ColumnInfo(name = "environment_json") val environmentJson: String = "[]",
+    @ColumnInfo(name = "headers_json") val headersJson: String = "[]",
+    @ColumnInfo(name = "request_timeout_ms") val requestTimeoutMs: Long? = null,
 )
 
 private val mcpJson = Json {
@@ -53,12 +55,12 @@ internal fun McpServerSetting.toEntity(): McpServerEntity = McpServerEntity(
     lastRefreshedAt = lastRefreshedAt,
     lastProtocolVersion = lastProtocolVersion,
     toolsExpireAt = toolsExpireAt,
+    toolsTruncationReason = toolsTruncationReason?.wireValue,
     transport = transport,
     command = command,
     argsJson = mcpJson.encodeToString(ListSerializer(String.serializer()), args),
     environmentJson = mcpJson.encodeToString(ListSerializer(String.serializer()), environment),
     headersJson = mcpJson.encodeToString(ListSerializer(String.serializer()), headers),
-    startupTimeoutMs = startupTimeoutMs,
     requestTimeoutMs = requestTimeoutMs,
 )
 
@@ -80,15 +82,15 @@ internal fun McpServerEntity.toDomain(): McpServerSetting = McpServerSetting(
     lastRefreshedAt = lastRefreshedAt,
     lastProtocolVersion = lastProtocolVersion,
     toolsExpireAt = toolsExpireAt,
+    toolsTruncationReason = McpDiscoveryTruncation.fromWireValue(toolsTruncationReason),
     transport = transport,
     command = command,
-    args = mcpJson.decodeStringList(argsJson),
-    environment = mcpJson.decodeStringList(environmentJson),
-    headers = mcpJson.decodeStringList(headersJson),
-    startupTimeoutMs = startupTimeoutMs,
+    args = decodeStringList(argsJson),
+    environment = decodeStringList(environmentJson),
+    headers = decodeStringList(headersJson),
     requestTimeoutMs = requestTimeoutMs,
 )
 
-private fun Json.decodeStringList(raw: String): List<String> = runCatching {
-    decodeFromString(ListSerializer(String.serializer()), raw)
+private fun decodeStringList(raw: String): List<String> = runCatching {
+    mcpJson.decodeFromString(ListSerializer(String.serializer()), raw)
 }.getOrDefault(emptyList())

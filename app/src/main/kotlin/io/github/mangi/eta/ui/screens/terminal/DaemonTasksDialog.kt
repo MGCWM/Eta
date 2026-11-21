@@ -33,15 +33,17 @@ import io.github.mangi.eta.ui.app.displayName
 import io.github.mangi.eta.ui.components.EtaMonospace
 import io.github.mangi.eta.ui.components.StatusSuccess
 import io.github.mangi.eta.ui.components.coui.CouiNoticeDialog
+import io.github.mangi.eta.ui.components.currentGlassOverlayBackdrop
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.glass.GlassDialog
 import top.yukonga.miuix.kmp.squircle.squircleBackground
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
 
 @Composable
 internal fun DaemonTasksDialog(
+    show: Boolean,
     tasks: List<DaemonTaskUi>,
     onDismiss: () -> Unit,
     onStop: (String) -> Unit,
@@ -70,17 +72,19 @@ internal fun DaemonTasksDialog(
     when (LocalUiStyle.current) {
         AppearanceUiStyle.COUI -> {
             CouiNoticeDialog(
-                visible = true,
+                visible = show,
                 title = stringResource(R.string.terminal_daemon_tasks),
                 message = null,
+                scrollableContent = false,
                 onDismissRequest = onDismiss,
             ) {
                 body()
             }
         }
         AppearanceUiStyle.MIUIX -> {
-            WindowDialog(
-                show = true,
+            GlassDialog(
+                show = show,
+                backdrop = currentGlassOverlayBackdrop(),
                 title = stringResource(R.string.terminal_daemon_tasks),
                 onDismissRequest = onDismiss,
             ) {
@@ -184,13 +188,15 @@ private fun daemonStatusColor(task: DaemonTaskUi) = when {
 @Composable
 private fun daemonMeta(task: DaemonTaskUi): String {
     val environmentLabel = task.environment.displayName
-    val stateLabel = when (task.status) {
-        "completed" -> "已完成"
-        "failed" -> "执行失败"
-        "timed_out" -> "已超时"
-        "stopped" -> "已停止"
-        "interrupted" -> "已中断"
-        else -> stringResource(if (task.running) R.string.terminal_daemon_running else R.string.terminal_daemon_exited)
-    }
+    val stateLabel = stringResource(
+        when (task.status) {
+            "completed" -> R.string.ui_misc_daemon_completed
+            "failed" -> R.string.ui_misc_daemon_failed
+            "timed_out" -> R.string.ui_misc_daemon_timed_out
+            "stopped" -> R.string.ui_misc_daemon_stopped
+            "interrupted" -> R.string.ui_misc_daemon_interrupted
+            else -> if (task.running) R.string.terminal_daemon_running else R.string.terminal_daemon_exited
+        },
+    )
     return "$environmentLabel · ${task.identity} · $stateLabel"
 }
