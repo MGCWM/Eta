@@ -3,7 +3,7 @@ package io.github.mangi.eta.ui.screens.settings
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -15,46 +15,35 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.EtaApp
 import io.github.mangi.eta.R
-import io.github.mangi.eta.data.model.AppearanceUiStyle
 import io.github.mangi.eta.data.model.ConversationTitleSettings
 import io.github.mangi.eta.data.model.ReasoningEffort
 import io.github.mangi.eta.data.model.enabledModel
 import io.github.mangi.eta.data.repository.ProviderRepository
 import io.github.mangi.eta.data.repository.RuntimeConfigRepository
-import io.github.mangi.eta.ui.app.LocalUiStyle
-import io.github.mangi.eta.ui.components.MiuixScaffoldPage
+import io.github.mangi.eta.ui.components.FooterHint
 import io.github.mangi.eta.ui.components.OptionalModelPickerContent
-import io.github.mangi.eta.ui.components.coui.CouiBottomSheet
-import io.github.mangi.eta.ui.components.coui.CouiDropdownPreference
-import io.github.mangi.eta.ui.components.coui.CouiPageBottomSpacer
-import io.github.mangi.eta.ui.components.coui.CouiPreference
-import io.github.mangi.eta.ui.components.coui.CouiPreferenceFooter
-import io.github.mangi.eta.ui.components.coui.CouiPreferenceGroup
-import io.github.mangi.eta.ui.components.coui.CouiScaffoldPage
-import io.github.mangi.eta.ui.components.coui.CouiSwitchPreference
+import io.github.mangi.eta.ui.components.ScaffoldPage
 import io.github.mangi.eta.ui.components.currentGlassOverlayBackdrop
 import io.github.mangi.eta.ui.model.AgentModelPickerProjector
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.BasicComponent
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.glass.GlassBottomSheet
 import top.yukonga.miuix.kmp.glass.GlassDropdownPreference
 import top.yukonga.miuix.kmp.preference.ArrowPreference
 import top.yukonga.miuix.kmp.preference.SwitchPreference
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun ConversationTitleSettingsScreen(
     onBack: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val providers by ProviderRepository.providersFlow().collectAsState(initial = emptyList())
-    val primaryProviderId by RuntimeConfigRepository.selectedProviderIdFlow().collectAsState(initial = null)
-    val primaryModelId by RuntimeConfigRepository.selectedModelIdFlow().collectAsState(initial = null)
+    val providers by ProviderRepository.providersFlow().collectAsStateWithLifecycle(initialValue = emptyList())
+    val primaryProviderId by RuntimeConfigRepository.selectedProviderIdFlow().collectAsStateWithLifecycle(initialValue = null)
+    val primaryModelId by RuntimeConfigRepository.selectedModelIdFlow().collectAsStateWithLifecycle(initialValue = null)
     val titleSettings by RuntimeConfigRepository.conversationTitleSettingsFlow()
-        .collectAsState(initial = ConversationTitleSettings())
+        .collectAsStateWithLifecycle(initialValue = ConversationTitleSettings())
 
     LaunchedEffect(Unit) {
         RuntimeConfigRepository.ensureDefaults(EtaApp.serviceInstance)
@@ -150,136 +139,64 @@ internal fun ConversationTitleSettingsScreen(
     val unsupportedSummary = stringResource(R.string.conversation_title_settings_reasoning_unsupported)
     val noteText = stringResource(R.string.conversation_title_settings_note)
 
-    when (LocalUiStyle.current) {
-        AppearanceUiStyle.COUI -> {
-            CouiScaffoldPage(
-                title = pageTitle,
-                onBack = onBack,
-                overlay = {
-                    CouiBottomSheet(
-                        show = showModelSheet,
-                        onDismissRequest = { showModelSheet = false },
-                        title = modelTitle,
-                    ) {
-                        OptionalModelPickerContent(
-                            pickerState = pickerState,
-                            selectedSecondaryModelId = resolvedCustom?.model?.id,
-                            followTitle = followTitle,
-                            followSubtitle = followSubtitle,
-                            onSelectModel = onSelectModel,
-                        )
-                    }
-                },
-            ) {
-                CouiPreferenceGroup(title = groupTitle) {
-                    item {
-                        CouiSwitchPreference(
-                            title = enabledTitle,
-                            checked = titleSettings.enabled,
-                            onCheckedChange = onToggleEnabled,
-                        )
-                    }
-                    item {
-                        CouiPreference(
-                            title = modelTitle,
-                            summary = modelSummary,
-                            enabled = titleSettings.enabled,
-                            onClick = { showModelSheet = true },
-                        )
-                    }
-                    if (effortOptions.size > 1) {
-                        item {
-                            CouiDropdownPreference(
-                                title = effortTitle,
-                                items = effortLabels,
-                                selectedIndex = selectedEffortIndex,
-                                enabled = titleSettings.enabled,
-                                onSelectedIndexChange = onEffortChange,
-                            )
-                        }
-                    } else {
-                        item {
-                            CouiPreference(
-                                title = effortTitle,
-                                summary = unsupportedSummary,
-                                enabled = false,
-                                showChevron = false,
-                            )
-                        }
-                    }
-                }
-                CouiPreferenceFooter(text = noteText)
-                CouiPageBottomSpacer()
+    ScaffoldPage(
+        title = pageTitle,
+        onBack = onBack,
+        overlay = {
+            GlassBottomSheet(
+                show = showModelSheet,
+                backdrop = currentGlassOverlayBackdrop(),
+                progressiveBlur = false,
+                title = modelTitle,
+                onDismissRequest = { showModelSheet = false },
+                insideMargin = DpSize(0.dp, 0.dp),
+            ) { _ ->
+                OptionalModelPickerContent(
+                    pickerState = pickerState,
+                    selectedSecondaryModelId = resolvedCustom?.model?.id,
+                    followTitle = followTitle,
+                    followSubtitle = followSubtitle,
+                    onSelectModel = onSelectModel,
+                )
             }
-        }
-
-        AppearanceUiStyle.MIUIX -> {
-            MiuixScaffoldPage(
-                title = pageTitle,
-                onBack = onBack,
-                overlay = {
-                    GlassBottomSheet(
-                        show = showModelSheet,
-                        backdrop = currentGlassOverlayBackdrop(),
-                        title = modelTitle,
-                        onDismissRequest = { showModelSheet = false },
-                        insideMargin = DpSize(0.dp, 0.dp),
-                    ) {
-                        OptionalModelPickerContent(
-                            pickerState = pickerState,
-                            selectedSecondaryModelId = resolvedCustom?.model?.id,
-                            followTitle = followTitle,
-                            followSubtitle = followSubtitle,
-                            onSelectModel = onSelectModel,
-                        )
-                    }
-                },
+        },
+    ) {
+        item(key = "title_settings_group") {
+            SmallTitle(groupTitle)
+            Card(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
             ) {
-                item(key = "title_settings_group") {
-                    SmallTitle(groupTitle)
-                    Card(
-                        modifier = Modifier
-                            .padding(horizontal = 12.dp)
-                            .padding(bottom = 12.dp),
-                    ) {
-                        SwitchPreference(
-                            title = enabledTitle,
-                            checked = titleSettings.enabled,
-                            onCheckedChange = onToggleEnabled,
-                        )
-                        ArrowPreference(
-                            title = modelTitle,
-                            summary = modelSummary,
-                            enabled = titleSettings.enabled,
-                            onClick = { showModelSheet = true },
-                        )
-                        if (effortOptions.size > 1) {
-                            GlassDropdownPreference(
-                                title = effortTitle,
-                                items = effortLabels,
-                                selectedIndex = selectedEffortIndex,
-                                backdrop = currentGlassOverlayBackdrop(),
-                                enabled = titleSettings.enabled,
-                                onSelectedIndexChange = onEffortChange,
-                            )
-                        } else {
-                            BasicComponent(
-                                title = effortTitle,
-                                summary = unsupportedSummary,
-                                enabled = false,
-                            )
-                        }
-                    }
-                    Text(
-                        text = noteText,
-                        style = MiuixTheme.textStyles.footnote2,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        modifier = Modifier
-                            .padding(horizontal = 28.dp)
-                            .padding(bottom = 12.dp),
+                SwitchPreference(
+                    title = enabledTitle,
+                    checked = titleSettings.enabled,
+                    onCheckedChange = onToggleEnabled,
+                )
+                ArrowPreference(
+                    title = modelTitle,
+                    summary = modelSummary,
+                    enabled = titleSettings.enabled,
+                    onClick = { showModelSheet = true },
+                )
+                if (effortOptions.size > 1) {
+                    GlassDropdownPreference(
+                        title = effortTitle,
+                        items = effortLabels,
+                        selectedIndex = selectedEffortIndex,
+                        backdrop = currentGlassOverlayBackdrop(),
+                        enabled = titleSettings.enabled,
+                        onSelectedIndexChange = onEffortChange,
+                    )
+                } else {
+                    BasicComponent(
+                        title = effortTitle,
+                        summary = unsupportedSummary,
+                        enabled = false,
                     )
                 }
             }
+            FooterHint(text = noteText)
         }
     }
 }

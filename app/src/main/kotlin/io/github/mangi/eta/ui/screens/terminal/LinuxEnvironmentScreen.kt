@@ -6,7 +6,7 @@ import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -16,41 +16,34 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import io.github.mangi.eta.R
-import io.github.mangi.eta.agent.terminal.AlpineEnvironmentInstaller
-import io.github.mangi.eta.agent.terminal.AlpineEnvironmentState
-import io.github.mangi.eta.agent.terminal.AlpineInstallProgress
-import io.github.mangi.eta.agent.terminal.AlpineInstallResult
-import io.github.mangi.eta.agent.terminal.AlpineInstallStage
-import io.github.mangi.eta.agent.terminal.ApkAnalysisInstallProgress
-import io.github.mangi.eta.agent.terminal.ApkAnalysisInstallResult
-import io.github.mangi.eta.agent.terminal.ApkAnalysisInstallStage
-import io.github.mangi.eta.agent.terminal.DebianEnvironmentInstaller
-import io.github.mangi.eta.agent.terminal.DebianEnvironmentState
-import io.github.mangi.eta.agent.terminal.DebianInstallProgress
-import io.github.mangi.eta.agent.terminal.DebianInstallResult
-import io.github.mangi.eta.agent.terminal.DebianInstallStage
-import io.github.mangi.eta.agent.terminal.LinuxApkAnalysisInstaller
+import io.github.mangi.eta.agent.terminal.linux.AlpineEnvironmentInstaller
+import io.github.mangi.eta.agent.terminal.linux.AlpineEnvironmentState
+import io.github.mangi.eta.agent.terminal.linux.AlpineInstallProgress
+import io.github.mangi.eta.agent.terminal.linux.AlpineInstallResult
+import io.github.mangi.eta.agent.terminal.linux.AlpineInstallStage
+import io.github.mangi.eta.agent.terminal.linux.ApkAnalysisInstallProgress
+import io.github.mangi.eta.agent.terminal.linux.ApkAnalysisInstallResult
+import io.github.mangi.eta.agent.terminal.linux.ApkAnalysisInstallStage
+import io.github.mangi.eta.agent.terminal.linux.DebianEnvironmentInstaller
+import io.github.mangi.eta.agent.terminal.linux.DebianEnvironmentState
+import io.github.mangi.eta.agent.terminal.linux.DebianInstallProgress
+import io.github.mangi.eta.agent.terminal.linux.DebianInstallResult
+import io.github.mangi.eta.agent.terminal.linux.DebianInstallStage
+import io.github.mangi.eta.agent.terminal.linux.LinuxApkAnalysisInstaller
 import io.github.mangi.eta.agent.terminal.LinuxDistribution
 import io.github.mangi.eta.agent.terminal.LinuxExecutionBackend
-import io.github.mangi.eta.agent.terminal.LinuxPackageProfile
-import io.github.mangi.eta.agent.terminal.LinuxPackageProfileInstaller
-import io.github.mangi.eta.agent.terminal.LinuxPackageProfiles
-import io.github.mangi.eta.agent.terminal.PackageProfileInstallProgress
-import io.github.mangi.eta.agent.terminal.PackageProfileInstallResult
-import io.github.mangi.eta.agent.terminal.PackageProfileInstallStage
-import io.github.mangi.eta.data.model.AppearanceUiStyle
+import io.github.mangi.eta.agent.terminal.linux.LinuxPackageProfile
+import io.github.mangi.eta.agent.terminal.linux.LinuxPackageProfileInstaller
+import io.github.mangi.eta.agent.terminal.linux.LinuxPackageProfiles
+import io.github.mangi.eta.agent.terminal.linux.PackageProfileInstallProgress
+import io.github.mangi.eta.agent.terminal.linux.PackageProfileInstallResult
+import io.github.mangi.eta.agent.terminal.linux.PackageProfileInstallStage
 import io.github.mangi.eta.data.repository.LinuxEnvironmentSettingsRepository
-import io.github.mangi.eta.ui.app.LocalUiStyle
 import io.github.mangi.eta.ui.app.launchForegroundExecution
-import io.github.mangi.eta.ui.app.rememberDeviceCapabilities
+import io.github.mangi.eta.ui.state.rememberDeviceCapabilities
 import io.github.mangi.eta.ui.app.rememberExecutionNotificationRequest
-import io.github.mangi.eta.ui.components.MiuixScaffoldPage
-import io.github.mangi.eta.ui.components.coui.CouiButton
-import io.github.mangi.eta.ui.components.coui.CouiLazyScaffoldPage
-import io.github.mangi.eta.ui.components.coui.CouiPreference
-import io.github.mangi.eta.ui.components.coui.CouiPreferenceGroup
+import io.github.mangi.eta.ui.components.ScaffoldPage
 import io.github.mangi.eta.ui.navigation.AppRoute
-import io.github.mangi.eta.ui.components.coui.CouiCardDivider as CouiDivider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -118,14 +111,12 @@ internal fun LinuxEnvironmentScreen(
     val selectionFlow = remember(appContext) {
         LinuxEnvironmentSettingsRepository.selectedFlow(appContext)
     }
-    val selectedDistribution by selectionFlow.collectAsState(
-        initial = LinuxEnvironmentSettingsRepository.current(appContext),
+    val selectedDistribution by selectionFlow.collectAsStateWithLifecycle(initialValue = LinuxEnvironmentSettingsRepository.current(appContext),
     )
     val backendFlow = remember(appContext, selectedDistribution, capabilities.root.isGranted) {
         LinuxEnvironmentSettingsRepository.backendFlow(appContext, selectedDistribution)
     }
-    val backend by backendFlow.collectAsState(
-        initial = LinuxEnvironmentSettingsRepository.backend(appContext, selectedDistribution),
+    val backend by backendFlow.collectAsStateWithLifecycle(initialValue = LinuxEnvironmentSettingsRepository.backend(appContext, selectedDistribution),
     )
     val requiresRoot = backend == LinuxExecutionBackend.CHROOT && !capabilities.root.isGranted
     val installer = remember(appContext, backend) { AlpineEnvironmentInstaller(appContext) }
@@ -238,8 +229,10 @@ internal fun LinuxEnvironmentScreen(
         }
     }
 
-    val uiStyle = LocalUiStyle.current
-    val listContent: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {
+    ScaffoldPage(
+        title = stringResource(R.string.ui_linux_tool_environment_314d22),
+        onBack = onBack,
+    ) {
         item(key = "status-card") {
             val version = when (selectedDistribution) {
                 LinuxDistribution.ALPINE -> status.version
@@ -286,10 +279,8 @@ internal fun LinuxEnvironmentScreen(
                 },
             )
         }
-        if (uiStyle != AppearanceUiStyle.COUI) {
-            item(key = "configuration-title") {
-                SmallTitle(stringResource(R.string.linux_environment_configuration))
-            }
+        item(key = "configuration-title") {
+            SmallTitle(stringResource(R.string.linux_environment_configuration))
         }
         item(key = "configuration-card") {
             LinuxEnvironmentConfiguration(
@@ -315,74 +306,47 @@ internal fun LinuxEnvironmentScreen(
                 },
             )
         }
-        if (uiStyle != AppearanceUiStyle.COUI) {
-            item(key = "files-title") {
-                SmallTitle(stringResource(R.string.linux_environment_files))
-            }
+        item(key = "files-title") {
+            SmallTitle(stringResource(R.string.linux_environment_files))
         }
         item(key = "files-card") {
-            if (uiStyle == AppearanceUiStyle.COUI) {
-                CouiPreferenceGroup(title = stringResource(R.string.linux_environment_files)) {
-                    item {
-                        CouiPreference(
-                            title = stringResource(R.string.capability_workspace),
-                            summary = stringResource(R.string.capability_workspace_summary),
-                            onClick = { onNavigate(AppRoute.Workspace) },
-                        )
-                    }
-                    if (selectedBaseReady) {
-                        item {
-                            CouiPreference(
-                                title = stringResource(R.string.shared_folders_entry_title),
-                                summary = stringResource(R.string.linux_environment_shared_folders_summary),
-                                onClick = { onNavigate(AppRoute.SharedFolders) },
-                            )
-                        }
-                        item {
-                            CouiPreference(
-                                title = stringResource(R.string.linux_files_entry_title),
-                                summary = stringResource(R.string.linux_files_entry_summary),
-                                onClick = { onNavigate(AppRoute.LinuxFiles(selectedDistribution.wireName)) },
-                            )
-                        }
-                    }
-                }
-            } else {
-                Card(
-                    modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .padding(bottom = 12.dp),
-                ) {
+            Card(
+                modifier = Modifier
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 12.dp),
+            ) {
+                ArrowPreference(
+                    title = stringResource(R.string.capability_workspace),
+                    summary = stringResource(R.string.capability_workspace_summary),
+                    onClick = { onNavigate(AppRoute.Workspace) },
+                )
+                if (selectedBaseReady) {
                     ArrowPreference(
-                        title = stringResource(R.string.capability_workspace),
-                        summary = stringResource(R.string.capability_workspace_summary),
-                        onClick = { onNavigate(AppRoute.Workspace) },
+                        title = stringResource(R.string.shared_folders_entry_title),
+                        summary = stringResource(R.string.linux_environment_shared_folders_summary),
+                        onClick = { onNavigate(AppRoute.SharedFolders) },
                     )
-                    if (selectedBaseReady) {
-                        ArrowPreference(
-                            title = stringResource(R.string.shared_folders_entry_title),
-                            summary = stringResource(R.string.linux_environment_shared_folders_summary),
-                            onClick = { onNavigate(AppRoute.SharedFolders) },
-                        )
-                        ArrowPreference(
-                            title = stringResource(R.string.linux_files_entry_title),
-                            summary = stringResource(R.string.linux_files_entry_summary),
-                            onClick = { onNavigate(AppRoute.LinuxFiles(selectedDistribution.wireName)) },
-                        )
-                    }
+                    ArrowPreference(
+                        title = stringResource(R.string.linux_files_entry_title),
+                        summary = stringResource(R.string.linux_files_entry_summary),
+                        onClick = { onNavigate(AppRoute.LinuxFiles(selectedDistribution.wireName)) },
+                    )
                 }
             }
         }
 
         if (selectedToolsReady) {
-            if (uiStyle != AppearanceUiStyle.COUI) {
-                item(key = "optional-tools-title") {
-                    SmallTitle(stringResource(R.string.ui_optional_tools_3097d6), modifier = Modifier.animateItem())
-                }
+            item(key = "optional-tools-title") {
+                SmallTitle(stringResource(R.string.ui_optional_tools_3097d6), modifier = Modifier.animateItem())
             }
             item(key = "optional-tools-card") {
-                val optionalItemsContent: @Composable () -> Unit = {
-                    packageProfileUis.forEachIndexed { _, profileUi ->
+                Card(
+                    modifier = Modifier
+                        .animateItem()
+                        .padding(horizontal = 12.dp)
+                        .padding(bottom = 12.dp),
+                ) {
+                    packageProfileUis.forEach { profileUi ->
                         val ready = profileReady[profileUi.target] == true
                         val summaryRes = if (selectedDistribution == LinuxDistribution.DEBIAN) {
                             profileUi.debianSummaryRes
@@ -428,38 +392,20 @@ internal fun LinuxEnvironmentScreen(
                                 }
                             }
                         }
-                        if (uiStyle == AppearanceUiStyle.COUI) {
-                            CouiPreference(
-                                title = rowTitle,
-                                summary = rowSummary,
-                                showChevron = false,
-                                trailing = {
-                                    CouiButton(
-                                        text = primaryText,
-                                        enabled = primaryEnabled,
-                                        minHeight = 32.dp,
-                                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                        onClick = onPrimaryClick,
-                                    )
-                                },
-                            )
-                            CouiDivider()
-                        } else {
-                            BasicComponent(
-                                title = rowTitle,
-                                summary = rowSummary,
-                                endActions = {
-                                    TextButton(
-                                        text = primaryText,
-                                        enabled = primaryEnabled,
-                                        minWidth = 0.dp,
-                                        minHeight = 32.dp,
-                                        insideMargin = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                        onClick = onPrimaryClick,
-                                    )
-                                },
-                            )
-                        }
+                        BasicComponent(
+                            title = rowTitle,
+                            summary = rowSummary,
+                            endActions = {
+                                TextButton(
+                                    text = primaryText,
+                                    enabled = primaryEnabled,
+                                    minWidth = 0.dp,
+                                    minHeight = 32.dp,
+                                    insideMargin = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                    onClick = onPrimaryClick,
+                                )
+                            },
+                        )
                     }
 
                     val apkSummary = apkAnalysisProgress?.summary(context) ?: if (apkAnalysisReady) {
@@ -490,75 +436,22 @@ internal fun LinuxEnvironmentScreen(
                             }
                         }
                     }
-                    if (uiStyle == AppearanceUiStyle.COUI) {
-                        CouiPreference(
-                            title = stringResource(R.string.ui_apk_analysis_95ad17),
-                            summary = apkSummary,
-                            showChevron = false,
-                            trailing = {
-                                CouiButton(
-                                    text = apkButtonText,
-                                    enabled = apkEnabled,
-                                    minHeight = 32.dp,
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                    onClick = onApkInstall,
-                                )
-                            },
-                        )
-                    } else {
-                        BasicComponent(
-                            title = stringResource(R.string.ui_apk_analysis_95ad17),
-                            summary = apkSummary,
-                            endActions = {
-                                TextButton(
-                                    text = apkButtonText,
-                                    enabled = apkEnabled,
-                                    minWidth = 0.dp,
-                                    minHeight = 32.dp,
-                                    insideMargin = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                    onClick = onApkInstall,
-                                )
-                            },
-                        )
-                    }
-                }
-                if (uiStyle == AppearanceUiStyle.COUI) {
-                    CouiPreferenceGroup(
-                        modifier = Modifier.animateItem(),
-                        title = stringResource(R.string.ui_optional_tools_3097d6),
-                    ) {
-                        item {
-                            optionalItemsContent()
-                        }
-                    }
-                } else {
-                    Card(
-                        modifier = Modifier
-                            .animateItem()
-                            .padding(horizontal = 12.dp)
-                            .padding(bottom = 12.dp),
-                    ) {
-                        optionalItemsContent()
-                    }
+                    BasicComponent(
+                        title = stringResource(R.string.ui_apk_analysis_95ad17),
+                        summary = apkSummary,
+                        endActions = {
+                            TextButton(
+                                text = apkButtonText,
+                                enabled = apkEnabled,
+                                minWidth = 0.dp,
+                                minHeight = 32.dp,
+                                insideMargin = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                onClick = onApkInstall,
+                            )
+                        },
+                    )
                 }
             }
-        }
-    }
-
-    when (uiStyle) {
-        AppearanceUiStyle.COUI -> {
-            CouiLazyScaffoldPage(
-                title = stringResource(R.string.ui_linux_tool_environment_314d22),
-                onBack = onBack,
-                content = { listContent() },
-            )
-        }
-        AppearanceUiStyle.MIUIX -> {
-            MiuixScaffoldPage(
-                title = stringResource(R.string.ui_linux_tool_environment_314d22),
-                onBack = onBack,
-                content = listContent,
-            )
         }
     }
 }

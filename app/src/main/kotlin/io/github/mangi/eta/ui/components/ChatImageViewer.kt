@@ -25,13 +25,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -87,6 +85,9 @@ import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import io.github.mangi.eta.ui.components.chat.rememberChatImageBitmap
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 
 @Stable
 internal class ChatImagePreviewer {
@@ -123,6 +124,12 @@ internal class ChatImagePreviewer {
 
     fun dismiss() {
         targetOpen = false
+    }
+
+    /** 路由切换或导航重置时立即关闭，避免飞回已销毁页面的旧缩略图位置。 */
+    fun closeImmediately() {
+        targetOpen = false
+        request = null
     }
 
     /** 绘制阶段读取：当前正在飞行或全屏展示的缩略图隐藏原位，避免开合过渡出现重影。 */
@@ -237,7 +244,7 @@ private fun ChatImageViewerOverlay(
             },
     ) {
         if (request.images.size == 1) {
-            val bitmap = rememberDataUrlBitmap(request.images[0])
+            val bitmap = rememberChatImageBitmap(request.images[0], maxDimensionPx = 2560)
             val sourceRect = request.sourceBoundsProvider?.invoke(0)?.translate(
                 translateX = -hostWindowOffset.x,
                 translateY = -hostWindowOffset.y,

@@ -50,12 +50,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.boundsInWindow
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
@@ -71,17 +68,7 @@ import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.mangi.eta.R
-import io.github.mangi.eta.data.model.AppearanceUiStyle
 import io.github.mangi.eta.ui.app.LocalGlassPageBackdrop
-import io.github.mangi.eta.ui.app.LocalUiStyle
-import io.github.mangi.eta.ui.components.coui.CouiBottomSheet
-import io.github.mangi.eta.ui.components.coui.CouiChipTabs
-import io.github.mangi.eta.ui.components.coui.CouiMenu
-import io.github.mangi.eta.ui.components.coui.CouiMenuItem
-import io.github.mangi.eta.ui.components.coui.CouiSearchBarBox
-import io.github.mangi.eta.ui.components.coui.couiButtonFeedback
-import io.github.mangi.eta.ui.components.coui.couiMenuAnchor
-import io.github.mangi.eta.ui.components.coui.rememberCouiMenuAnchor
 import io.github.mangi.eta.ui.model.AgentModelOptionUi
 import io.github.mangi.eta.ui.model.AgentModelPickerUiState
 import io.github.mangi.eta.ui.model.filterGroups
@@ -94,12 +81,14 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.InputField
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.glass.GlassBottomSheet
-import top.yukonga.miuix.kmp.glass.GlassPopup
 import top.yukonga.miuix.kmp.glass.GlassPopupDefaults
 import top.yukonga.miuix.kmp.glass.GlassPopupSizing
 import top.yukonga.miuix.kmp.glass.GlassTopAppBarDefaults
+import top.yukonga.miuix.kmp.glass.GlassTransformPopup
 import top.yukonga.miuix.kmp.glass.glassPanel
+import top.yukonga.miuix.kmp.glass.glassPopupAnchor
 import top.yukonga.miuix.kmp.glass.glassPress
+import top.yukonga.miuix.kmp.glass.rememberGlassPopupAnchor
 import top.yukonga.miuix.kmp.icon.MiuixIcons
 import top.yukonga.miuix.kmp.icon.basic.Check
 import top.yukonga.miuix.kmp.icon.glass.Ok
@@ -115,7 +104,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * 聊天首页顶栏的复合标题与模型切换入口：
  * - 新对话：居中呈现轻盈的模型胶囊 `[ ✦ 模型名 ▾ ]`
  * - 对话进行中：上行会话标题，下行紧凑模型副标题，整块可点切换模型
- * - 角色对话：左侧头像直达角色详情，右侧双行展示角色名与当前模型
+ * - 角色对话：左侧头像直达角色详情，右侧双行展示会话标题（无标题时回落角色名）与当前模型
  */
 @Composable
 internal fun AgentTopBarChatHeader(
@@ -130,7 +119,6 @@ internal fun AgentTopBarChatHeader(
     var showPopup by remember { mutableStateOf(false) }
     var showSheet by remember { mutableStateOf(false) }
     var sheetSession by remember { mutableIntStateOf(0) }
-    var headerAnchorBounds by remember { mutableStateOf(Rect.Zero) }
     val selected = state.selectedModel
     val enabled = !isStreaming && state.providerGroups.isNotEmpty()
     val canTriggerPicker = enabled && !state.isChanging
@@ -143,9 +131,7 @@ internal fun AgentTopBarChatHeader(
 
     val currentModel = selected?.displayName ?: stringResource(R.string.model_not_selected)
     val switchModelDescription = stringResource(R.string.model_switch_current, currentModel)
-    val anchor = rememberCouiMenuAnchor()
-    val uiStyle = LocalUiStyle.current
-    val isCoui = uiStyle == AppearanceUiStyle.COUI
+    val popupAnchor = rememberGlassPopupAnchor()
     val isDark = MiuixTheme.colorScheme.surface.luminance() < 0.5f
     val ink = MiuixTheme.colorScheme.onSurface.copy(alpha = 1f)
     val subtitleColor = ink.copy(alpha = if (isDark) 0.56f else 0.52f)
@@ -156,7 +142,7 @@ internal fun AgentTopBarChatHeader(
     val triggerModelPicker: () -> Unit = {
         if (canTriggerPicker) {
             if (state.modelCount <= ModelPopupLimit) {
-                anchor.open { showPopup = true }
+                showPopup = true
             } else {
                 sheetSession += 1
                 showSheet = true
@@ -177,13 +163,7 @@ internal fun AgentTopBarChatHeader(
                     Box(
                         modifier = Modifier
                             .clip(CircleShape)
-                            .then(
-                                if (isCoui) {
-                                    Modifier.couiButtonFeedback(isDark, avatarInteractionSource, enabled = true)
-                                } else {
-                                    Modifier.glassPress(avatarInteractionSource, enabled = true)
-                                },
-                            )
+                            .glassPress(avatarInteractionSource, enabled = true)
                             .clickable(
                                 interactionSource = avatarInteractionSource,
                                 indication = null,
@@ -206,16 +186,12 @@ internal fun AgentTopBarChatHeader(
                     Column(
                         modifier = Modifier
                             .weight(1f, fill = false)
-                            .onGloballyPositioned { headerAnchorBounds = it.boundsInWindow() }
-                            .couiMenuAnchor(anchor)
-                            .clip(RoundedCornerShape(10.dp))
-                            .then(
-                                if (isCoui) {
-                                    Modifier.couiButtonFeedback(isDark, interactionSource, enabled = enabled)
-                                } else {
-                                    Modifier.glassPress(interactionSource, enabled = enabled)
-                                },
+                            .glassPopupAnchor(
+                                anchor = popupAnchor,
+                                cornerRadius = 10.dp,
                             )
+                            .clip(RoundedCornerShape(10.dp))
+                            .glassPress(interactionSource, enabled = enabled)
                             .clickable(
                                 interactionSource = interactionSource,
                                 indication = null,
@@ -226,8 +202,9 @@ internal fun AgentTopBarChatHeader(
                             .semantics { contentDescription = switchModelDescription }
                             .padding(horizontal = 6.dp, vertical = 3.dp),
                     ) {
+                        val headerTitle = conversationTitle?.takeIf(String::isNotBlank) ?: character.characterName
                         Text(
-                            text = character.characterName,
+                            text = headerTitle,
                             style = MiuixTheme.textStyles.body1.copy(
                                 fontSize = 15.5.sp,
                                 lineHeight = 19.sp,
@@ -252,16 +229,12 @@ internal fun AgentTopBarChatHeader(
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
-                        .onGloballyPositioned { headerAnchorBounds = it.boundsInWindow() }
-                        .couiMenuAnchor(anchor)
-                        .clip(RoundedCornerShape(12.dp))
-                        .then(
-                            if (isCoui) {
-                                Modifier.couiButtonFeedback(isDark, interactionSource, enabled = enabled)
-                            } else {
-                                Modifier.glassPress(interactionSource, enabled = enabled)
-                            },
+                        .glassPopupAnchor(
+                            anchor = popupAnchor,
+                            cornerRadius = 12.dp,
                         )
+                        .clip(RoundedCornerShape(12.dp))
+                        .glassPress(interactionSource, enabled = enabled)
                         .clickable(
                             interactionSource = interactionSource,
                             indication = null,
@@ -294,50 +267,34 @@ internal fun AgentTopBarChatHeader(
             }
 
             else -> {
-                val pillFill = ink.copy(alpha = if (isDark) 0.08f else 0.042f)
-                val pillBorder = ink.copy(alpha = if (isDark) 0.12f else 0.07f)
-                val miuixCapsuleModifier = if (isCoui) {
-                    Modifier
-                        .heightIn(min = 34.dp)
-                        .clip(CircleShape)
-                        .background(pillFill, CircleShape)
-                        .border(0.5.dp, pillBorder, CircleShape)
-                        .couiButtonFeedback(isDark, interactionSource, enabled = enabled)
-                        .padding(start = 11.dp, end = if (enabled) 8.dp else 12.dp, top = 6.dp, bottom = 6.dp)
-                } else {
-                    val pillShape = GlassShape(20.dp)
-                    Modifier
-                        .heightIn(min = 40.dp)
-                        .glassPress(interactionSource, enabled = enabled)
-                        .glassPanel(
-                            backdrop = pageBackdrop,
-                            shape = pillShape,
-                            style = GlassDefaults.style(isDark),
-                            material = GlassMaterials.puredThinGlass(isDark),
-                            stroke = GlassEdgeStrokes.forTheme(
-                                isDark = isDark,
-                                light = GlassEdgeStrokes.SmallLight,
-                                dark = GlassEdgeStrokes.SmallDark,
-                            ),
-                            shadow = GlassShadows.Float,
-                            shading = false,
-                            fallback = Modifier
-                                .clip(CircleShape)
-                                .background(GlassTopAppBarDefaults.buttonFill()),
-                        )
-                        .padding(start = 13.dp, end = if (enabled) 10.dp else 14.dp, top = 8.dp, bottom = 8.dp)
-                }
+                val pillShape = GlassShape(20.dp)
+                val capsuleModifier = Modifier
+                    .heightIn(min = 40.dp)
+                    .glassPress(interactionSource, enabled = enabled)
+                    .glassPanel(
+                        backdrop = pageBackdrop,
+                        shape = pillShape,
+                        style = GlassDefaults.style(isDark),
+                        material = GlassMaterials.puredThinGlass(isDark),
+                        stroke = GlassEdgeStrokes.forTheme(
+                            isDark = isDark,
+                            light = GlassEdgeStrokes.SmallLight,
+                            dark = GlassEdgeStrokes.SmallDark,
+                        ),
+                        shadow = GlassShadows.Float,
+                        shading = false,
+                        fallback = Modifier
+                            .clip(CircleShape)
+                            .background(GlassTopAppBarDefaults.buttonFill()),
+                    )
+                    .padding(start = 13.dp, end = if (enabled) 10.dp else 14.dp, top = 8.dp, bottom = 8.dp)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
-                        .onGloballyPositioned { headerAnchorBounds = it.boundsInWindow() }
-                        .couiMenuAnchor(anchor)
-                        .then(
-                            if (isCoui) {
-                                miuixCapsuleModifier
-                            } else {
-                                Modifier
-                            },
+                        .glassPopupAnchor(
+                            anchor = popupAnchor,
+                            cornerRadius = 20.dp,
+                            floating = true,
                         )
                         .clickable(
                             interactionSource = interactionSource,
@@ -347,7 +304,7 @@ internal fun AgentTopBarChatHeader(
                             onClick = triggerModelPicker,
                         )
                         .semantics { contentDescription = switchModelDescription }
-                        .then(if (isCoui) Modifier else miuixCapsuleModifier),
+                        .then(capsuleModifier),
                 ) {
                     ModelBrandMark(
                         modelId = selected?.modelId,
@@ -380,109 +337,153 @@ internal fun AgentTopBarChatHeader(
             }
         }
 
-        when (uiStyle) {
-            AppearanceUiStyle.COUI -> {
-                val menuItems = remember(state.providerGroups, state.selectedModel?.id) {
-                    val multipleGroups = state.providerGroups.size > 1
-                    state.providerGroups.flatMapIndexed { groupIndex, group ->
-                        group.models.mapIndexed { modelIndex, model ->
-                            CouiMenuItem(
-                                value = model.id,
-                                text = if (multipleGroups) "${group.providerName} · ${model.displayName}" else model.displayName,
-                                selected = model.id == state.selectedModel?.id,
-                                dividerBefore = multipleGroups && groupIndex > 0 && modelIndex == 0,
-                            )
+        val overlayBackdrop = currentGlassOverlayBackdrop() ?: pageBackdrop
+        val select = rememberConfirmedSelection { modelId ->
+            showPopup = false
+            if (modelId != null) onModelSelected(modelId)
+        }
+        val selectedId = select.pending?.let { it.modelId } ?: state.selectedModel?.id
+        val showGroupLabels = state.providerGroups.size > 1
+
+        TopLayer {
+            GlassTransformPopup(
+                show = showPopup,
+                onDismissRequest = { showPopup = false },
+                anchor = popupAnchor,
+                backdrop = overlayBackdrop,
+                sizing = GlassPopupSizing(
+                    minWidth = ModelPopupWidth,
+                    maxWidth = 300.dp,
+                    maxHeight = 380.dp,
+                ),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                anchorContent = {
+                    when {
+                        character != null -> {
+                            val headerTitle = conversationTitle?.takeIf(String::isNotBlank) ?: character.characterName
+                            Column(modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)) {
+                                Text(
+                                    text = headerTitle,
+                                    style = MiuixTheme.textStyles.body1.copy(
+                                        fontSize = 15.5.sp,
+                                        lineHeight = 19.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                    ),
+                                    color = MiuixTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                ModelSubtitleRow(
+                                    selected = selected,
+                                    modelName = currentModel,
+                                    textColor = subtitleColor,
+                                    chevronColor = chevronColor,
+                                    showChevron = enabled,
+                                )
+                            }
+                        }
+                        !conversationTitle.isNullOrBlank() -> {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+                            ) {
+                                Text(
+                                    text = conversationTitle,
+                                    style = MiuixTheme.textStyles.body1.copy(
+                                        fontSize = 15.5.sp,
+                                        lineHeight = 19.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                    ),
+                                    color = MiuixTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                ModelSubtitleRow(
+                                    selected = selected,
+                                    modelName = currentModel,
+                                    textColor = subtitleColor,
+                                    chevronColor = chevronColor,
+                                    showChevron = enabled,
+                                )
+                            }
+                        }
+                        else -> {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .heightIn(min = 40.dp)
+                                    .padding(start = 13.dp, end = if (enabled) 10.dp else 14.dp, top = 8.dp, bottom = 8.dp),
+                            ) {
+                                ModelBrandMark(
+                                    modelId = selected?.modelId,
+                                    sourceType = selected?.providerSourceType,
+                                    size = 15.dp,
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = currentModel,
+                                    style = MiuixTheme.textStyles.body2.copy(
+                                        fontSize = 14.sp,
+                                        lineHeight = 18.sp,
+                                        fontWeight = FontWeight.Medium,
+                                    ),
+                                    color = MiuixTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.widthIn(max = 180.dp),
+                                )
+                                if (enabled) {
+                                    Spacer(modifier = Modifier.width(2.dp))
+                                    Icon(
+                                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = chevronColor,
+                                    )
+                                }
+                            }
                         }
                     }
-                }
-                CouiMenu(
-                    expanded = showPopup,
-                    onDismissRequest = { showPopup = false },
-                    items = menuItems,
-                    onItemClick = { item ->
-                        showPopup = false
-                        onModelSelected(item.value)
-                    },
-                    anchor = anchor,
-                )
-
-                CouiBottomSheet(
-                    show = showSheet,
-                    onDismissRequest = { showSheet = false },
-                    title = stringResource(R.string.model_picker_title),
-                ) {
-                    key(sheetSession) {
-                        ModelSheetContent(
-                            state = state,
-                            onModelSelected = { modelId ->
-                                showSheet = false
-                                onModelSelected(modelId)
-                            },
+                },
+            ) {
+                state.providerGroups.forEachIndexed { groupIndex, group ->
+                    if (showGroupLabels && groupIndex > 0) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(
+                                horizontal = GlassPopupDefaults.DividerPaddingHorizontal,
+                                vertical = GlassPopupDefaults.DividerPaddingVertical,
+                            ),
+                            thickness = GlassPopupDefaults.DividerThickness,
+                        )
+                    }
+                    group.models.forEach { model ->
+                        GlassModelPopupItem(
+                            model = model,
+                            summary = if (showGroupLabels) group.providerName else null,
+                            selected = model.id == selectedId,
+                            onClick = { select(model.id) },
                         )
                     }
                 }
             }
+        }
 
-            AppearanceUiStyle.MIUIX -> {
-                val overlayBackdrop = currentGlassOverlayBackdrop() ?: pageBackdrop
-                val select = rememberConfirmedSelection { modelId ->
-                    showPopup = false
-                    if (modelId != null) onModelSelected(modelId)
-                }
-                val selectedId = select.pending?.let { it.modelId } ?: state.selectedModel?.id
-                val showGroupLabels = state.providerGroups.size > 1
-
-                EtaTopLayer {
-                    GlassPopup(
-                        show = showPopup,
-                        onDismissRequest = { showPopup = false },
-                        anchorBounds = headerAnchorBounds,
-                        backdrop = overlayBackdrop,
-                        sizing = GlassPopupSizing(
-                            minWidth = ModelPopupWidth,
-                            maxWidth = 300.dp,
-                            maxHeight = 380.dp,
-                        ),
-                    ) {
-                        state.providerGroups.forEachIndexed { groupIndex, group ->
-                            if (showGroupLabels && groupIndex > 0) {
-                                HorizontalDivider(
-                                    modifier = Modifier.padding(
-                                        horizontal = GlassPopupDefaults.DividerPaddingHorizontal,
-                                        vertical = GlassPopupDefaults.DividerPaddingVertical,
-                                    ),
-                                    thickness = GlassPopupDefaults.DividerThickness,
-                                )
-                            }
-                            group.models.forEach { model ->
-                                GlassModelPopupItem(
-                                    model = model,
-                                    summary = if (showGroupLabels) group.providerName else null,
-                                    selected = model.id == selectedId,
-                                    onClick = { select(model.id) },
-                                )
-                            }
-                        }
-                    }
-                }
-
-                GlassBottomSheet(
-                    show = showSheet,
-                    backdrop = overlayBackdrop,
-                    title = stringResource(R.string.model_picker_title),
-                    onDismissRequest = { showSheet = false },
-                    insideMargin = DpSize(0.dp, 0.dp),
-                ) {
-                    key(sheetSession) {
-                        ModelSheetContent(
-                            state = state,
-                            onModelSelected = { modelId ->
-                                showSheet = false
-                                onModelSelected(modelId)
-                            },
-                        )
-                    }
-                }
+        GlassBottomSheet(
+            show = showSheet,
+            backdrop = overlayBackdrop,
+            progressiveBlur = false,
+            title = stringResource(R.string.model_picker_title),
+            onDismissRequest = { showSheet = false },
+            insideMargin = DpSize(0.dp, 0.dp),
+        ) { _ ->
+            key(sheetSession) {
+                ModelSheetContent(
+                    state = state,
+                    onModelSelected = { modelId ->
+                        showSheet = false
+                        onModelSelected(modelId)
+                    },
+                )
             }
         }
     }
@@ -692,70 +693,47 @@ internal fun ModelPickerSheetContent(
     }
     val density = LocalDensity.current
     val sheetHeight = with(density) { LocalWindowInfo.current.containerSize.height.toDp() } * 0.68f
-    val isCoui = LocalUiStyle.current == AppearanceUiStyle.COUI
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .height(sheetHeight)
-            .then(if (isCoui) Modifier else Modifier.navigationBarsPadding()),
+            .navigationBarsPadding(),
     ) {
-        when (LocalUiStyle.current) {
-            AppearanceUiStyle.COUI -> {
-                CouiSearchBarBox(
-                    query = query,
-                    onQueryChange = { query = it },
-                    placeholder = stringResource(R.string.ui_search_model_df5586),
-                )
-                if (pickerState.providerGroups.size > 1) {
-                    val allLabel = stringResource(R.string.model_picker_filter_all)
-                    val tabItems = remember(pickerState.providerGroups, allLabel) {
-                        listOf("" to allLabel) + pickerState.providerGroups.map { it.providerId to it.providerName }
-                    }
-                    CouiChipTabs(
-                        items = tabItems,
-                        selectedKey = providerFilter.orEmpty(),
-                        onSelectedKeyChange = { key -> providerFilter = key.takeIf { it.isNotEmpty() } },
+        InputField(
+            query = query,
+            onQueryChange = { query = it },
+            onSearch = {},
+            expanded = false,
+            onExpandedChange = {},
+            label = stringResource(R.string.ui_search_model_df5586),
+            color = glassOverlayFieldBackgroundColor(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(top = 4.dp, bottom = 8.dp),
+        )
+        if (pickerState.providerGroups.size > 1) {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(bottom = 8.dp),
+            ) {
+                item(key = "all") {
+                    ChoiceChip(
+                        text = stringResource(R.string.model_picker_filter_all),
+                        selected = providerFilter == null,
+                        onClick = { providerFilter = null },
                     )
                 }
-            }
-            AppearanceUiStyle.MIUIX -> {
-                InputField(
-                    query = query,
-                    onQueryChange = { query = it },
-                    onSearch = {},
-                    expanded = false,
-                    onExpandedChange = {},
-                    label = stringResource(R.string.ui_search_model_df5586),
-                    color = glassOverlayFieldBackgroundColor(),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .padding(top = 4.dp, bottom = 8.dp),
-                )
-                if (pickerState.providerGroups.size > 1) {
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(bottom = 8.dp),
-                    ) {
-                        item(key = "all") {
-                            EtaChoiceChip(
-                                text = stringResource(R.string.model_picker_filter_all),
-                                selected = providerFilter == null,
-                                onClick = { providerFilter = null },
-                            )
-                        }
-                        items(pickerState.providerGroups, key = { it.providerId }) { group ->
-                            EtaChoiceChip(
-                                text = group.providerName,
-                                selected = providerFilter == group.providerId,
-                                onClick = {
-                                    providerFilter = if (providerFilter == group.providerId) null else group.providerId
-                                },
-                            )
-                        }
-                    }
+                items(pickerState.providerGroups, key = { it.providerId }) { group ->
+                    ChoiceChip(
+                        text = group.providerName,
+                        selected = providerFilter == group.providerId,
+                        onClick = {
+                            providerFilter = if (providerFilter == group.providerId) null else group.providerId
+                        },
+                    )
                 }
             }
         }
@@ -867,19 +845,14 @@ private fun ModelPickerOptionRow(
     onClick: () -> Unit,
     horizontalPadding: Dp = 12.dp,
 ) {
-    val isCoui = LocalUiStyle.current == AppearanceUiStyle.COUI
     val isDark = MiuixTheme.colorScheme.background.luminance() < 0.5f
-    val containerColor = when {
-        !selected -> Color.Transparent
-        isCoui -> MiuixTheme.colorScheme.tertiaryContainer
-        else -> MiuixTheme.colorScheme.primary.copy(alpha = if (isDark) 0.16f else 0.08f)
+    val containerColor = if (selected) {
+        MiuixTheme.colorScheme.primary.copy(alpha = if (isDark) 0.16f else 0.08f)
+    } else {
+        Color.Transparent
     }
-    val contentColor = when {
-        !selected -> MiuixTheme.colorScheme.onSurface
-        isCoui -> MiuixTheme.colorScheme.onTertiaryContainer
-        else -> MiuixTheme.colorScheme.primary
-    }
-    val checkIcon = if (isCoui) Icons.Rounded.Check else MiuixIcons.Glass.Ok
+    val contentColor = if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface
+    val checkIcon = MiuixIcons.Glass.Ok
     Row(
         modifier = Modifier
             .fillMaxWidth()

@@ -3,10 +3,10 @@ package io.github.mangi.eta.agent.voice
 import io.github.mangi.eta.data.model.TtsProvider
 import io.github.mangi.eta.data.model.SpeechSettings
 import io.github.mangi.eta.data.repository.SpeechSettingsRepository
-import io.github.mangi.eta.ui.voice.openSpeechSettings
-import io.github.mangi.eta.ui.voice.SpeechPlaybackErrors
-import io.github.mangi.eta.ui.voice.LocalSpeechPlayback
-import io.github.mangi.eta.ui.voice.LocalSpeechPlaybackEnabled
+import io.github.mangi.eta.ui.components.openSpeechSettings
+import io.github.mangi.eta.ui.components.SpeechPlaybackErrors
+import io.github.mangi.eta.ui.components.LocalSpeechPlayback
+import io.github.mangi.eta.ui.components.LocalSpeechPlaybackEnabled
 import android.os.PowerManager
 import android.Manifest
 import android.app.ActivityOptions
@@ -34,12 +34,10 @@ import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.setTextAndPlaceCursorAtEnd
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.Lifecycle
@@ -51,20 +49,20 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import io.github.mangi.eta.R
-import io.github.mangi.eta.agent.model.AgentModelClient
+import io.github.mangi.eta.agent.model.provider.AgentModelClient
 import io.github.mangi.eta.agent.overlay.AgentOverlayVisibilityPolicy
-import io.github.mangi.eta.agent.runtime.AgentEvent
-import io.github.mangi.eta.agent.runtime.AgentExternalArchivePayload
-import io.github.mangi.eta.agent.runtime.AgentRuntimeClient
-import io.github.mangi.eta.agent.runtime.AgentRuntimeWire
+import io.github.mangi.eta.agent.runtime.ipc.AgentEvent
+import io.github.mangi.eta.agent.runtime.archive.AgentExternalArchivePayload
+import io.github.mangi.eta.agent.runtime.ipc.AgentRuntimeClient
+import io.github.mangi.eta.agent.runtime.ipc.AgentRuntimeWire
 import io.github.mangi.eta.core.AndroidAgentLogger
 import io.github.mangi.eta.data.model.AppearanceSettings
 import io.github.mangi.eta.data.repository.AppearanceSettingsRepository
 import io.github.mangi.eta.ui.MainActivity
 import io.github.mangi.eta.ui.conversationHandoffStartMode
 import io.github.mangi.eta.ui.app.AgentAppTheme
-import io.github.mangi.eta.ui.app.AgentRunEventCoalescer
-import io.github.mangi.eta.ui.app.AgentRunMessageProjector
+import io.github.mangi.eta.ui.state.AgentRunEventCoalescer
+import io.github.mangi.eta.ui.state.AgentRunMessageProjector
 import io.github.mangi.eta.ui.model.AgentChatMessageUi
 import io.github.mangi.eta.ui.model.AgentMessageUi
 import io.github.mangi.eta.ui.model.SystemNoticeCode
@@ -83,6 +81,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.squircle.LocalSquircleEnabled
+import io.github.mangi.eta.agent.voice.ui.EtaSpeechPhase
+import io.github.mangi.eta.agent.voice.ui.EtaSpeechState
+import io.github.mangi.eta.agent.voice.ui.EtaVoicePanel
+import io.github.mangi.eta.agent.voice.ui.EtaVoicePhase
+import io.github.mangi.eta.agent.voice.ui.EtaVoiceUiState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import io.github.mangi.eta.agent.voice.asr.SpeechInputController
+import io.github.mangi.eta.agent.voice.tts.SpeechPlaybackController
 
 /**
  * Eta 数字助理的用户界面窗口。
@@ -349,10 +356,9 @@ internal class EtaAssistantOverlayService : Service(), LifecycleOwner, SavedStat
         val wm = getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
         val view = createComposeView {
             val appearance by AppearanceSettingsRepository.settingsFlow()
-                .collectAsState(initial = AppearanceSettings())
+                .collectAsStateWithLifecycle(initialValue = AppearanceSettings())
             AgentAppTheme(
                 appearance = appearance,
-                systemOverlay = true,
             ) {
                 // ColorOS 在 Overlay 窗口切换期间可能短暂使用软件画布；RuntimeShader
                 // 无法在该画布绘制，因此浮窗统一使用 Miuix 的圆角回退路径。

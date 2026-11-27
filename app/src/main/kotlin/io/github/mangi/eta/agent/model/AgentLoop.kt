@@ -1,7 +1,7 @@
 package io.github.mangi.eta.agent.model
 
 import io.github.mangi.eta.R
-import io.github.mangi.eta.agent.runtime.AgentEvent
+import io.github.mangi.eta.agent.runtime.ipc.AgentEvent
 import io.github.mangi.eta.agent.runtime.AgentRunController
 import io.github.mangi.eta.agent.runtime.AgentTokenUsage
 import io.github.mangi.eta.agent.roleplay.RoleplayRunContext
@@ -14,6 +14,17 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.supervisorScope
 import org.json.JSONArray
 import org.json.JSONObject
+import io.github.mangi.eta.agent.model.format.AgentTraceFormatter
+import io.github.mangi.eta.agent.model.provider.AgentModelClient
+import io.github.mangi.eta.agent.model.provider.AgentModelFailure
+import io.github.mangi.eta.agent.model.provider.AgentModelRetry
+import io.github.mangi.eta.agent.model.provider.AgentProviderClient
+import io.github.mangi.eta.agent.model.provider.AssistantBlockKind
+import io.github.mangi.eta.agent.model.provider.AssistantStopReason
+import io.github.mangi.eta.agent.model.provider.ProviderEvent
+import io.github.mangi.eta.agent.model.provider.ProviderRequest
+import io.github.mangi.eta.agent.model.provider.ProviderRequestPurpose
+import io.github.mangi.eta.agent.model.provider.ProviderResponse
 
 /**
  * 单次 Agent run 的纯编排循环。
@@ -78,6 +89,31 @@ internal class AgentLoop(
 
     private fun appendMessage(message: JSONObject) {
         messages.put(message)
+        transcript.put(message)
+    }
+
+    /**
+     * 运行中插话等持久消息必须落在瞬态工具观察截图（`_eta_observation`）之前，
+     * 避免下轮摘除尾部截图时改变该消息的前缀位置并击穿提示缓存断点。
+     */
+    private fun appendMessageBeforePendingObservation(message: JSONObject) {
+        val pending = pendingToolImageMessage
+        var inserted = false
+        if (pending != null) {
+            for (index in messages.length() - 1 downTo 0) {
+                if (messages.optJSONObject(index) === pending) {
+                    for (shift in messages.length() downTo index + 1) {
+                        messages.put(shift, messages.get(shift - 1))
+                    }
+                    messages.put(index, message)
+                    inserted = true
+                    break
+                }
+            }
+        }
+        if (!inserted) {
+            messages.put(message)
+        }
         transcript.put(message)
     }
 
@@ -365,7 +401,7 @@ internal class AgentLoop(
 
     private fun appendPendingSteeringMessage(): Boolean {
         val supplement = runController.pollSteeringMessage() ?: return false
-        appendMessage(steeringMessage(supplement))
+        appendMessageBeforePendingObservation(steeringMessage(supplement))
         context.userAppended()
         turnMetrics.reset()
         return true
@@ -373,7 +409,7 @@ internal class AgentLoop(
 
     private fun appendPendingSteeringOrSeal(): Boolean {
         val supplement = runController.pollSteeringOrSeal() ?: return false
-        appendMessage(steeringMessage(supplement))
+        appendMessageBeforePendingObservation(steeringMessage(supplement))
         context.userAppended()
         turnMetrics.reset()
         return true

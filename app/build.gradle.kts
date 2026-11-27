@@ -43,8 +43,8 @@ android {
         minSdk = 34
         targetSdk = 37
         // versionCode 规则：yyyyMMdd + 两位当日序号（01 起），发版时随 versionName 一起手动递增。
-        versionCode = 2026111302
-        versionName = "3.4.4"
+        versionCode = 2026112501
+        versionName = "4.0.0"
 
         ndk {
             // 同时过滤本地与依赖 AAR 的原生库，确保 APK 仅包含 ARM64。
@@ -162,15 +162,10 @@ dependencies {
     implementation(libs.libxposed.service)
     implementation(libs.dexkit)
     constraints {
-        // 延续旧依赖图中两套 UI 共用的窗口尺寸和 Android 兼容组件版本。
+        // 锁定窗口尺寸与 AndroidX 核心组件版本，避免依赖传递版本漂移。
         implementation(libs.androidx.compose.window.size)
         implementation(libs.androidx.core.ktx)
     }
-    implementation(libs.coui.ui)
-    implementation(libs.coui.preference)
-    implementation(libs.coui.icons)
-    implementation(libs.coui.blur)
-    implementation(libs.coui.squircle)
     implementation(libs.miuix.ui)
     implementation(libs.miuix.blur)
     implementation(libs.miuix.glass)
