@@ -1,6 +1,6 @@
 package io.github.mangi.eta.agent.mcp
 
-import io.github.mangi.eta.agent.model.AgentHttpClient
+import io.github.mangi.eta.agent.model.provider.AgentHttpClient
 import io.github.mangi.eta.data.model.McpProtocolMode
 import io.github.mangi.eta.data.model.McpServerSetting
 import java.io.IOException
